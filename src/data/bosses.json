@@ -1,0 +1,83 @@
+[
+	{
+		"id": "kaban",
+		"name": "Kaban",
+		"icon": "bosses/kaban.webp",
+		"maps": ["streets-of-tarkov"]
+	},
+	{
+		"id": "kollontay",
+		"name": "Kollontay",
+		"icon": "bosses/kollontay.webp",
+		"maps": ["streets-of-tarkov"]
+	},
+	{
+		"id": "killa",
+		"name": "Killa",
+		"icon": "bosses/killa.webp",
+		"maps": ["interchange"]
+	},
+	{
+		"id": "tagilla",
+		"name": "Tagilla",
+		"icon": "bosses/tagilla.webp",
+		"maps": ["factory", "interchange"]
+	},
+	{
+		"id": "gluhar",
+		"name": "Glukhar",
+		"icon": "bosses/glukhar.webp",
+		"maps": ["reserve"]
+	},
+	{
+		"id": "shturman",
+		"name": "Shturman",
+		"icon": "bosses/shturman.webp",
+		"maps": ["woods"]
+	},
+	{
+		"id": "sanitar",
+		"name": "Sanitar",
+		"icon": "bosses/sanitar.webp",
+		"maps": ["shoreline"]
+	},
+	{
+		"id": "reshala",
+		"name": "Reshala",
+		"icon": "bosses/reshala.webp",
+		"maps": ["customs"]
+	},
+	{
+		"id": "bigpipe",
+		"name": "Big Pipe",
+		"icon": "bosses/big-pipe.webp",
+		"maps": ["lighthouse", "customs", "shoreline", "woods"],
+		"group": "goons"
+	},
+	{
+		"id": "birdeye",
+		"name": "Birdeye",
+		"icon": "bosses/birdeye.webp",
+		"maps": ["lighthouse", "customs", "shoreline", "woods"],
+		"group": "goons"
+	},
+	{
+		"id": "knight",
+		"name": "Knight",
+		"icon": "bosses/knight.webp",
+		"maps": ["lighthouse", "customs", "shoreline", "woods"],
+		"group": "goons"
+	},
+	{
+		"id": "partisan",
+		"name": "Partisan",
+		"icon": "bosses/partisan.webp",
+		"maps": ["lighthouse", "customs", "shoreline", "woods"]
+	},
+	{
+		"id": "zryachiy",
+		"name": "Zryachiy",
+		"icon": "bosses/zryachiy.webp",
+		"maps": ["lighthouse"]
+	}
+]

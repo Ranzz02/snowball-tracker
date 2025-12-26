@@ -1,0 +1,35 @@
+name: Bug report
+description: Something in the app is broken or calculates the wrong payout
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a run with ...
+        2. Add a raid on ...
+        3. ...
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: From the installer name or Settings.
+      placeholder: 1.0.0
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots help. Please remove friend names you don't want public.

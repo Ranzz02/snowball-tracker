@@ -1,0 +1,8 @@
+# Normalise text files to LF in the repo (matches .prettierrc endOfLine)
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.webp binary
+*.ico binary
+*.exe binary

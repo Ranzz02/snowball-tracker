@@ -1,0 +1,10 @@
+[
+	{ "id": "customs", "name": "Customs" },
+	{ "id": "factory", "name": "Factory" },
+	{ "id": "interchange", "name": "Interchange" },
+	{ "id": "lighthouse", "name": "Lighthouse" },
+	{ "id": "reserve", "name": "Reserve" },
+	{ "id": "shoreline", "name": "Shoreline" },
+	{ "id": "streets-of-tarkov", "name": "Streets of Tarkov" },
+	{ "id": "woods", "name": "Woods" }
+]
