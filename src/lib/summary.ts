@@ -9,7 +9,7 @@ import {
 	type BossContext,
 } from './payouts';
 
-const nameOf = (data: AppData, id: string) =>
+export const nameOf = (data: AppData, id: string) =>
 	data.friends.find((f) => f.id === id)?.name ?? 'Unknown';
 
 /** Plain-text recap of one run, ready to paste into Discord. */

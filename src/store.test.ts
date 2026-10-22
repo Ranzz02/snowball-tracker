@@ -50,15 +50,27 @@ describe('run snapshots', () => {
 		expect(run.completionBonus).toBe(42);
 	});
 
-	it('applyRatesToRun refreshes the run snapshots', () => {
+	it('applyRatesToRun refreshes rates and bonus but not targets', () => {
 		const s = useGameStore.getState();
 		const id = s.startRun('hunter', []);
 		s.setRequiredBossIds(['killa']);
 		s.setRates({ completionBonus: 9 });
 		s.applyRatesToRun(id);
 		const run = useGameStore.getState().runs[id];
-		expect(run.requiredBossIds).toEqual(['killa']);
+		expect(run.requiredBossIds).toEqual([]);
 		expect(run.completionBonus).toBe(9);
+	});
+
+	it('applyTargetsToRun refreshes only the targets', () => {
+		const s = useGameStore.getState();
+		const id = s.startRun('hunter', []);
+		const raidId = s.addRaid(id, 'customs')!;
+		s.setRaidRates(id, raidId, { pmcKill: 1 });
+		s.setRequiredBossIds(['killa']);
+		s.applyTargetsToRun(id);
+		const run = useGameStore.getState().runs[id];
+		expect(run.requiredBossIds).toEqual(['killa']);
+		expect(run.raids[0].rates.pmcKill).toBe(1);
 	});
 
 	it('only targets bosses the run still needs on the map', () => {
@@ -90,7 +102,7 @@ describe('undo', () => {
 
 	const bonus = () => useGameStore.getState().rates.completionBonus;
 
-	it('groups quick changes into one step and redoes them', () => {
+	it('groups quick edits of the same field into one step and redoes them', () => {
 		const before = bonus();
 		const s = useGameStore.getState();
 		s.setRates({ completionBonus: 1 });
@@ -104,10 +116,21 @@ describe('undo', () => {
 	it('keeps separate steps when changes are apart', () => {
 		const s = useGameStore.getState();
 		s.setRates({ completionBonus: 1 });
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(1500);
 		s.setRates({ completionBonus: 2 });
 		undo();
 		expect(bonus()).toBe(1);
+	});
+
+	it('keeps quick discrete actions as separate steps', () => {
+		const s = useGameStore.getState();
+		const id = s.startRun('hunter', []);
+		const raidId = s.addRaid(id, 'interchange')!;
+		s.toggleBossKilled(id, raidId, 'killa', true);
+		undo();
+		const run = useGameStore.getState().runs[id];
+		expect(run.raids).toHaveLength(1);
+		expect(run.raids[0].bosses.every((b) => !b.killed)).toBe(true);
 	});
 
 	it('starts a new step for an edit right after an undo', () => {

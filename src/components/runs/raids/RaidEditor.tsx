@@ -7,7 +7,8 @@ import { runBreakdown, sumLines, type Line } from '../../../lib/payouts';
 import { formatShort, formatSigned } from '../../../lib/format';
 import { RATE_FIELDS } from '../../../lib/rateFields';
 import { raidSummaryText } from '../../../lib/summary';
-import { confirmAction, toast, useFeedback } from '../../ui/feedback';
+import { confirmAction, toast } from '../../ui/feedback';
+import { shortcutsBlocked } from '../../ui/shortcuts';
 import { Drawer } from '../../ui/Overlays';
 import {
 	BossAvatar,
@@ -247,14 +248,12 @@ export default function RaidEditor({
 	const lines = (raid && breakdown?.perRaid[raid.id]) || {};
 	const total = Object.values(lines).reduce((s, l) => s + sumLines(l), 0);
 
-	// 1–9 toggles a boss, Shift+1–9 adds a PMC kill to that helper (not while typing)
+	// 1–9 toggles a boss, Shift+1–9 adds a PMC kill to that helper (not while typing or behind a dialog)
 	useEffect(() => {
 		if (!raid) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
-			const target = e.target as HTMLElement | null;
-			if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-			if (useFeedback.getState().confirmRequest) return;
+			if (shortcutsBlocked(e)) return;
 			const digit = /^Digit([1-9])$/.exec(e.code);
 			if (!digit) return;
 			const i = Number(digit[1]) - 1;

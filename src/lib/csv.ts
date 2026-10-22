@@ -1,6 +1,7 @@
 import type { AppData, Boss } from '../models';
 import { CATEGORY_LABELS, ledger, type Category } from './payouts';
 import { helperStats } from './stats';
+import { nameOf } from './summary';
 
 type Cell = string | number;
 
@@ -14,20 +15,24 @@ function cell(value: Cell): string {
 export const toCsv = (rows: Cell[][]) =>
 	rows.map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 
-const nameOf = (data: AppData, id: string) =>
-	data.friends.find((f) => f.id === id)?.name ?? 'Unknown';
-
-/** One row per friend: totals, earnings by category and helper stats. Amounts in roubles. */
-export function ledgerCsv(data: AppData, bosses: Boss[]): string {
-	const entries = Object.values(ledger(data, bosses)).filter((e) => e.earned || e.paid);
-	const stats = helperStats(Object.values(data.runs));
+/**
+ * One row per friend: totals, earnings by category and helper stats, in roubles. With a
+ * run id, earnings and stats cover that run only (as the Ledger screen does), while paid
+ * and owed stay all-time.
+ */
+export function ledgerCsv(data: AppData, bosses: Boss[], runId?: string): string {
+	const all = ledger(data, bosses);
+	const run = runId ? data.runs[runId] : undefined;
+	const scoped = run ? ledger({ ...data, runs: { [run.id]: run }, payments: [] }, bosses) : all;
+	const entries = Object.values(all).filter((e) => e.earned || e.paid);
+	const stats = helperStats(run ? [run] : Object.values(data.runs));
 	const categories = Object.keys(CATEGORY_LABELS) as Category[];
 	const rows: Cell[][] = [
 		[
 			'Friend',
-			'Earned',
-			'Paid',
-			'Owed',
+			run ? 'Earned (this run)' : 'Earned',
+			'Paid (all)',
+			'Owed (all)',
 			...categories.map((c) => CATEGORY_LABELS[c]),
 			'Raids',
 			'Bosses killed',
@@ -41,10 +46,10 @@ export function ledgerCsv(data: AppData, bosses: Boss[]): string {
 		const s = stats[e.friendId];
 		rows.push([
 			nameOf(data, e.friendId),
-			e.earned,
+			scoped[e.friendId]?.earned ?? 0,
 			e.paid,
 			e.owed,
-			...categories.map((c) => e.byCategory[c] ?? 0),
+			...categories.map((c) => scoped[e.friendId]?.byCategory[c] ?? 0),
 			s?.raids ?? 0,
 			s?.bossKills ?? 0,
 			s?.pmcKills ?? 0,

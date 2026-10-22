@@ -230,9 +230,11 @@ export default function LedgerTab() {
 	};
 
 	const exportCsv = async (kind: 'ledger' | 'payments') => {
-		const csv = kind === 'ledger' ? ledgerCsv(data, bosses) : paymentsCsv(data);
+		const csv = kind === 'ledger' ? ledgerCsv(data, bosses, scopeRun?.id) : paymentsCsv(data);
 		const day = new Date().toLocaleDateString('sv-SE');
-		const path = await window.api.exportCsv(`snowball-${kind}-${day}.csv`, csv);
+		const runDay =
+			scopeRun && kind === 'ledger' ? `-run-${scopeRun.createdAt.slice(0, 10)}` : '';
+		const path = await window.api.exportCsv(`snowball-${kind}${runDay}-${day}.csv`, csv);
 		if (path) toast(`Saved ${path}`);
 	};
 

@@ -69,6 +69,7 @@ interface Actions {
 	// Settings
 	setRates: (patch: Partial<Rates>) => void;
 	applyRatesToRun: (runId: string) => void;
+	applyTargetsToRun: (runId: string) => void;
 	savePreset: (preset: Preset) => void;
 	deletePreset: (presetId: string) => void;
 	setRequiredBossIds: (ids: string[]) => void;
@@ -128,9 +129,21 @@ const HISTORY_KEYS = [
 	'payments',
 ] as const satisfies readonly (keyof History)[];
 
-// Changes this close together are one undo step, so typing a note undoes in one go
-const UNDO_GROUP_MS = 600;
-let lastChange = 0; // reset after undo, redo and clear so the next edit starts a new step
+// Repeated edits of one field (typing a note, a rate) less than this apart are one undo
+// step. Discrete actions (toggles, adds, deletes) are always a step of their own.
+const UNDO_GROUP_MS = 1000;
+let editKey: string | null = null; // set while a groupable edit runs
+let lastKey: string | null = null; // reset after undo, redo and clear to start a new step
+let lastChange = 0;
+
+const editing = (key: string, fn: () => void) => {
+	editKey = key;
+	try {
+		fn();
+	} finally {
+		editKey = null;
+	}
+};
 
 export const useGameStore = create<Store>()(
 	temporal(
@@ -210,10 +223,12 @@ export const useGameStore = create<Store>()(
 					}),
 
 				setRunNotes: (runId, notes) =>
-					set((s) => {
-						const run = s.runs[runId];
-						if (run) run.notes = notes;
-					}),
+					editing(`runNotes:${runId}`, () =>
+						set((s) => {
+							const run = s.runs[runId];
+							if (run) run.notes = notes;
+						}),
+					),
 
 				addRaid: (runId, mapId) => {
 					const s = get();
@@ -257,14 +272,18 @@ export const useGameStore = create<Store>()(
 					}),
 
 				setRaidNotes: (runId, raidId, notes) =>
-					withRaid(runId, raidId, (raid) => {
-						raid.notes = notes;
-					}),
+					editing(`raidNotes:${raidId}`, () =>
+						withRaid(runId, raidId, (raid) => {
+							raid.notes = notes;
+						}),
+					),
 
 				setRaidRates: (runId, raidId, patch) =>
-					withRaid(runId, raidId, (raid) => {
-						Object.assign(raid.rates, patch);
-					}),
+					editing(`raidRates:${raidId}:${Object.keys(patch).join()}`, () =>
+						withRaid(runId, raidId, (raid) => {
+							Object.assign(raid.rates, patch);
+						}),
+					),
 
 				toggleBossKilled: (runId, raidId, bossId, killed) =>
 					withRaid(runId, raidId, (raid) => {
@@ -330,9 +349,11 @@ export const useGameStore = create<Store>()(
 					}),
 
 				setRates: (patch) =>
-					set((s) => {
-						Object.assign(s.rates, patch);
-					}),
+					editing(`rates:${Object.keys(patch).join()}`, () =>
+						set((s) => {
+							Object.assign(s.rates, patch);
+						}),
+					),
 
 				applyRatesToRun: (runId) =>
 					set((s) => {
@@ -340,15 +361,26 @@ export const useGameStore = create<Store>()(
 						if (!run) return;
 						for (const raid of run.raids) raid.rates = { ...s.rates };
 						run.completionBonus = s.rates.completionBonus;
-						run.requiredBossIds = [...s.requiredBossIds];
 					}),
 
-				savePreset: (preset) =>
+				applyTargetsToRun: (runId) =>
 					set((s) => {
-						const i = s.presets.findIndex((p) => p.id === preset.id);
-						if (i >= 0) s.presets[i] = preset;
-						else s.presets.push(preset);
+						const run = s.runs[runId];
+						if (run) run.requiredBossIds = [...s.requiredBossIds];
 					}),
+
+				savePreset: (preset) => {
+					const save = () =>
+						set((s) => {
+							const i = s.presets.findIndex((p) => p.id === preset.id);
+							if (i >= 0) s.presets[i] = preset;
+							else s.presets.push(preset);
+						});
+					// Adding a preset is its own step; editing its fields groups like typing
+					if (get().presets.some((p) => p.id === preset.id)) {
+						editing(`preset:${preset.id}`, save);
+					} else save();
+				},
 
 				deletePreset: (presetId) =>
 					set((s) => {
@@ -409,7 +441,10 @@ export const useGameStore = create<Store>()(
 			limit: 100,
 			handleSet: (handleSet) => (pastState, replace) => {
 				const now = Date.now();
-				if (now - lastChange > UNDO_GROUP_MS) handleSet(pastState, replace as false);
+				const sameEdit =
+					editKey !== null && editKey === lastKey && now - lastChange <= UNDO_GROUP_MS;
+				if (!sameEdit) handleSet(pastState, replace as false);
+				lastKey = editKey;
 				lastChange = now;
 			},
 		},
@@ -417,15 +452,15 @@ export const useGameStore = create<Store>()(
 );
 
 export const undo = () => {
-	lastChange = 0;
+	lastKey = null;
 	useGameStore.temporal.getState().undo();
 };
 export const redo = () => {
-	lastChange = 0;
+	lastKey = null;
 	useGameStore.temporal.getState().redo();
 };
 export const clearHistory = () => {
-	lastChange = 0;
+	lastKey = null;
 	useGameStore.temporal.getState().clear();
 };
 

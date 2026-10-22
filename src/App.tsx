@@ -9,6 +9,7 @@ import LedgerTab from './components/ledger/LedgerTab';
 import FriendsTab from './components/FriendsTab';
 import SettingsTab from './components/SettingsTab';
 import { FeedbackHost } from './components/ui/Overlays';
+import { shortcutsBlocked } from './components/ui/shortcuts';
 import { FriendChip, ProgressBar, Rub } from './components/ui/ui';
 import './index.css';
 
@@ -89,13 +90,12 @@ function UndoButtons() {
 	);
 }
 
-// Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) outside text fields, which keep their own undo
+// Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z), except in text fields (own undo) or behind a dialog
 function useUndoShortcuts() {
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-			const target = e.target as HTMLElement | null;
-			if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+			if (shortcutsBlocked(e)) return;
 			const key = e.key.toLowerCase();
 			const isRedo = key === 'y' || (key === 'z' && e.shiftKey);
 			if (key !== 'z' && !isRedo) return;

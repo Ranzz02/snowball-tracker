@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { promises as fs, writeFileSync } from 'node:fs';
 
@@ -78,12 +78,16 @@ const backupDir = path.join(dataDir, 'backups');
 const KEEP_BACKUPS = 14;
 const BACKUP_NAME = /^app-data-\d{4}-\d{2}-\d{2}\.json$/;
 
+let backedUpDay = ''; // skips the file check on every save once today's copy exists
+
 // Before the first save of each day, keep a copy of the file as it was
 async function dailyBackup(): Promise<void> {
 	const day = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, local time
+	if (day === backedUpDay) return;
 	const target = path.join(backupDir, `app-data-${day}.json`);
 	try {
 		await fs.access(target);
+		backedUpDay = day;
 		return;
 	} catch {
 		// No backup yet today
@@ -91,6 +95,7 @@ async function dailyBackup(): Promise<void> {
 	try {
 		await fs.mkdir(backupDir, { recursive: true });
 		await fs.copyFile(dataFile, target);
+		backedUpDay = day;
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
 			console.error('Daily backup failed:', error);
@@ -221,10 +226,12 @@ async function loadWindowState(): Promise<WindowState> {
 	return visible ? { ...bounds, maximized: saved.maximized } : size;
 }
 
-// Only the app itself may load in the window; web links open in the browser
+// Only the app itself may load in the window (not, say, a file dropped onto it, which
+// would run with window.api); web links open in the browser
 function isAppUrl(url: string): boolean {
 	if (VITE_DEV_SERVER_URL) return url.startsWith(VITE_DEV_SERVER_URL);
-	return url.startsWith('file:');
+	const appUrl = pathToFileURL(path.join(RENDERER_DIST, 'index.html')).href;
+	return url.split(/[?#]/)[0] === appUrl;
 }
 
 function openExternal(url: string) {
@@ -282,7 +289,10 @@ async function createWindow() {
 			}
 		}
 		const finish = () => {
-			if (target && !target.isDestroyed()) target.destroy();
+			if (!target || target.isDestroyed()) return;
+			target.destroy();
+			// Preventing the close cancelled a Cmd+Q / app.quit(), so carry it on
+			if (quitting) app.quit();
 		};
 		ipcMain.once('flush-done', finish);
 		setTimeout(finish, 2000);
@@ -295,6 +305,11 @@ async function createWindow() {
 		win.loadFile(path.join(RENDERER_DIST, 'index.html'));
 	}
 }
+
+let quitting = false;
+app.on('before-quit', () => {
+	quitting = true;
+});
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
