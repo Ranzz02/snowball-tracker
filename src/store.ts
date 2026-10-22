@@ -79,6 +79,7 @@ interface Actions {
 
 	// Payments
 	addPayment: (payment: Omit<Payment, 'id' | 'timestamp'>) => void;
+	addPayments: (payments: Omit<Payment, 'id' | 'timestamp'>[]) => void;
 	removePayment: (paymentId: string) => void;
 
 	// Data
@@ -359,13 +360,14 @@ export const useGameStore = create<Store>()(
 					s.friends = s.friends.filter((f) => f.id !== friendId);
 				}),
 
-			addPayment: (payment) =>
+			addPayment: (payment) => get().addPayments([payment]),
+
+			addPayments: (payments) =>
 				set((s) => {
-					s.payments.push({
-						...payment,
-						id: newId('pay'),
-						timestamp: new Date().toISOString(),
-					});
+					const timestamp = new Date().toISOString();
+					for (const payment of payments) {
+						s.payments.push({ ...payment, id: newId('pay'), timestamp });
+					}
 				}),
 
 			removePayment: (paymentId) =>

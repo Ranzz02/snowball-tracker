@@ -1,37 +1,51 @@
 import { useMemo, useState } from 'react';
-import { ClipboardCopy, Undo2 } from 'lucide-react';
+import { CheckCheck, ClipboardCopy, Download, Undo2 } from 'lucide-react';
 import { useGameStore, toAppData } from '../../store';
 import { SCHEMA_VERSION, type Friend } from '../../models';
 import { useBossContext } from '../../lib/hooks';
-import { ledger, runBreakdown, type Category, type LedgerEntry } from '../../lib/payouts';
+import {
+	CATEGORY_LABELS,
+	ledger,
+	runBreakdown,
+	type Category,
+	type LedgerEntry,
+} from '../../lib/payouts';
 import { owedSummaryText } from '../../lib/summary';
-import { formatDate, formatDateTime } from '../../lib/format';
-import { toast } from '../ui/feedback';
+import { ledgerCsv, paymentsCsv } from '../../lib/csv';
+import { helperStats, type HelperStats } from '../../lib/stats';
+import { formatDate, formatDateTime, formatRub } from '../../lib/format';
+import { confirmAction, toast } from '../ui/feedback';
 import { Modal } from '../ui/Overlays';
 import { Badge, Button, FriendChip, NumberInput, Panel, Rub, Stat, inputClass } from '../ui/ui';
 
-const CATEGORY_LABELS: Record<Category, string> = {
-	base: 'Base',
-	pmc: 'PMC kills',
-	extract: 'Extracts',
-	died: 'Deaths',
-	teamKill: 'Team kills',
-	hunterDeath: 'Hunter deaths',
-	completion: 'Completion',
-	adjustment: 'Custom',
-};
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function StatsLine({ stats }: { stats?: HelperStats }) {
+	if (!stats || stats.raids === 0) return null;
+	const parts = [
+		plural(stats.raids, 'raid'),
+		plural(stats.bossKills, 'boss kill'),
+		plural(stats.pmcKills, 'PMC kill'),
+		plural(stats.deaths, 'death'),
+		plural(stats.teamKills, 'team kill'),
+		`${Math.round((stats.extracts / stats.raids) * 100)}% extracted`,
+	];
+	return <p className="mt-3 text-xs text-mute">{parts.join(' · ')}</p>;
+}
 
 function FriendLedger({
 	friend,
 	entry,
 	scopeEarned,
 	scopeCategories,
+	stats,
 	onSettle,
 }: {
 	friend: Friend;
 	entry: LedgerEntry;
 	scopeEarned: number;
 	scopeCategories: Partial<Record<Category, number>>;
+	stats?: HelperStats;
 	onSettle: () => void;
 }) {
 	const runs = useGameStore((s) => s.runs);
@@ -67,6 +81,8 @@ function FriendLedger({
 					/>
 				</Stat>
 			</div>
+
+			<StatsLine stats={stats} />
 
 			<div className="mt-3 flex flex-wrap gap-1.5">
 				{(Object.keys(CATEGORY_LABELS) as Category[])
@@ -125,6 +141,7 @@ export default function LedgerTab() {
 	const presets = useGameStore((s) => s.presets);
 	const bosses = useGameStore((s) => s.bosses);
 	const addPayment = useGameStore((s) => s.addPayment);
+	const addPayments = useGameStore((s) => s.addPayments);
 	const ctx = useBossContext();
 
 	const [scope, setScope] = useState('all');
@@ -154,6 +171,11 @@ export default function LedgerTab() {
 		[scopeRun, ctx],
 	);
 
+	const stats = useMemo(
+		() => helperStats(scopeRun ? [scopeRun] : Object.values(runs)),
+		[scopeRun, runs],
+	);
+
 	const scopeCategories = (friendId: string) => {
 		if (!scopeBreakdown) return entries[friendId].byCategory;
 		const out: Partial<Record<Category, number>> = {};
@@ -170,6 +192,7 @@ export default function LedgerTab() {
 		.filter((f) => !f.archived || entries[f.id]?.earned || entries[f.id]?.paid)
 		.sort((a, b) => entries[b.id].owed - entries[a.id].owed);
 	const totalOwed = visible.reduce((s, f) => s + entries[f.id].owed, 0);
+	const totalOwedPositive = visible.reduce((s, f) => s + Math.max(0, entries[f.id].owed), 0);
 
 	const openSettle = (f: Friend) => {
 		setSettling(f);
@@ -186,6 +209,31 @@ export default function LedgerTab() {
 		});
 		toast(`Recorded payment to ${settling.name}`);
 		setSettling(null);
+	};
+
+	const settleAll = async () => {
+		const owing = visible.filter((f) => entries[f.id].owed > 0);
+		if (owing.length === 0) return;
+		const total = owing.reduce((s, f) => s + entries[f.id].owed, 0);
+		const ok = await confirmAction({
+			title: 'Settle up with everyone?',
+			message: `Records ${owing.length === 1 ? 'a payment' : `${owing.length} payments`} totalling ${formatRub(total)}: ${owing
+				.map((f) => `${f.name} ${formatRub(entries[f.id].owed)}`)
+				.join(', ')}.`,
+			confirmLabel: 'Record payments',
+		});
+		if (!ok) return;
+		addPayments(
+			owing.map((f) => ({ friendId: f.id, amount: entries[f.id].owed, note: 'Settle all' })),
+		);
+		toast(`Recorded ${plural(owing.length, 'payment')}`);
+	};
+
+	const exportCsv = async (kind: 'ledger' | 'payments') => {
+		const csv = kind === 'ledger' ? ledgerCsv(data, bosses) : paymentsCsv(data);
+		const day = new Date().toLocaleDateString('sv-SE');
+		const path = await window.api.exportCsv(`snowball-${kind}-${day}.csv`, csv);
+		if (path) toast(`Saved ${path}`);
 	};
 
 	const copyOwed = async () => {
@@ -222,6 +270,19 @@ export default function LedgerTab() {
 					<Button onClick={copyOwed}>
 						<ClipboardCopy size={14} /> Copy for Discord
 					</Button>
+					<Button variant="primary" onClick={settleAll} disabled={totalOwedPositive <= 0}>
+						<CheckCheck size={14} /> Settle all
+					</Button>
+					<Button variant="ghost" onClick={() => exportCsv('ledger')}>
+						<Download size={14} /> Ledger CSV
+					</Button>
+					<Button
+						variant="ghost"
+						onClick={() => exportCsv('payments')}
+						disabled={payments.length === 0}
+					>
+						<Download size={14} /> Payments CSV
+					</Button>
 				</div>
 			</div>
 
@@ -244,6 +305,7 @@ export default function LedgerTab() {
 									: entries[f.id].earned
 							}
 							scopeCategories={scopeCategories(f.id)}
+							stats={stats[f.id]}
 							onSettle={() => openSettle(f)}
 						/>
 					))}

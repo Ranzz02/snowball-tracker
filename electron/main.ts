@@ -135,6 +135,22 @@ ipcMain.handle('export-data', async (event, data: unknown) => {
 	return result.filePath;
 });
 
+ipcMain.handle('export-csv', async (event, name: string, csv: string) => {
+	const win = BrowserWindow.fromWebContents(event.sender);
+	const options = {
+		title: 'Export CSV',
+		defaultPath: path.join(app.getPath('documents'), path.basename(name)),
+		filters: [{ name: 'CSV', extensions: ['csv'] }],
+	};
+	const result = win
+		? await dialog.showSaveDialog(win, options)
+		: await dialog.showSaveDialog(options);
+	if (result.canceled || !result.filePath) return null;
+	// The BOM makes Excel read the file as UTF-8 (names with ä, ö and so on)
+	await fs.writeFile(result.filePath, `\ufeff${csv}`, 'utf-8');
+	return result.filePath;
+});
+
 ipcMain.handle('import-data', async (event) => {
 	const win = BrowserWindow.fromWebContents(event.sender);
 	const options = {

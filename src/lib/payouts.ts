@@ -3,6 +3,17 @@ import type { AppData, Boss, Raid, Run } from '../models';
 export type Category =
 	'base' | 'pmc' | 'extract' | 'died' | 'teamKill' | 'hunterDeath' | 'completion' | 'adjustment';
 
+export const CATEGORY_LABELS: Record<Category, string> = {
+	base: 'Base',
+	pmc: 'PMC kills',
+	extract: 'Extracts',
+	died: 'Deaths',
+	teamKill: 'Team kills',
+	hunterDeath: 'Hunter deaths',
+	completion: 'Completion',
+	adjustment: 'Custom',
+};
+
 export interface Line {
 	category: Category;
 	label: string;
