@@ -17,6 +17,7 @@ The package manager is Yarn 4, pinned through the `packageManager` field in `pac
 - `yarn test`: Vitest, unit tests for `src/lib/` (`yarn vitest run src/lib/payouts.test.ts` for one file, `-t "name"` for one test).
 - `yarn lint`: ESLint 10 using the flat config in `eslint.config.js`, with `--max-warnings 0`, so any warning fails it.
 - `yarn format` / `yarn format:check`: Prettier, configured in `.prettierrc`. Code uses tabs (width 4), single quotes, semicolons, trailing commas and a print width of 100. YAML, Markdown and `package.json` use 2 spaces. `eslint-config-prettier` turns off ESLint rules that would conflict with Prettier.
+- Commits must follow Conventional Commits (`feat:`, `fix:`, `chore:` and so on). A husky `commit-msg` hook runs commitlint (`commitlint.config.js`), and CI checks PR titles. release-please (`release-please-config.json`, `.release-please-manifest.json`) turns `feat` and `fix` commits on `main` into a release PR that bumps the version and writes `CHANGELOG.md`. Merging that PR tags the release and calls `.github/workflows/release.yml` to build the installer. Don't hand-edit `CHANGELOG.md` or the version.
 
 The tests cover only the pure logic in `src/lib/`. There are no component or end-to-end tests.
 

@@ -10,6 +10,25 @@ Thanks for helping out. Bug reports, ideas for new bonus or penalty rules, and p
 
 Yarn refuses package versions published less than a day ago. If an install fails with "quarantined", use a slightly older version.
 
+## Commit messages
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org), because the changelog and version numbers are generated from them:
+
+```
+feat: add a "carried hunter" bonus preset
+fix(ledger): count payments made before the first run
+docs: explain the hunter-death rule
+```
+
+| Type                                                        | Effect on the next release              |
+| ----------------------------------------------------------- | --------------------------------------- |
+| `feat`                                                      | Minor version bump, listed in CHANGELOG |
+| `fix`, `perf`                                               | Patch version bump, listed in CHANGELOG |
+| `feat!` / `BREAKING CHANGE:` footer                         | Major version bump                      |
+| `docs`, `refactor`, `test`, `build`, `ci`, `chore`, `style` | No release on their own, not listed     |
+
+A git hook (husky + commitlint, installed by `yarn install`) rejects messages that don't follow the format. Pull requests are squash-merged, so CI checks the **PR title** the same way.
+
 ## Before opening a pull request
 
 ```sh
@@ -37,6 +56,9 @@ Never store payout totals. The UI always computes them from raids through `src/l
 
 ## Releasing
 
-1. Bump `version` in `package.json`.
-2. Commit, then tag the commit with the same version, for example `git tag v1.1.0 && git push --tags`.
-3. The Release workflow builds the Windows installer and attaches it to a GitHub release. It fails if the tag and the version in `package.json` don't match.
+Releases are automated with [release-please](https://github.com/googleapis/release-please):
+
+1. Merge `feat`/`fix` commits into `main`. release-please opens or updates a **release PR** (`chore(main): release x.y.z`) that bumps `package.json` and adds the new section to `CHANGELOG.md`.
+2. Merge the release PR when you want to ship. That creates the `vX.Y.Z` tag and GitHub release, then builds the Windows installer and attaches it.
+
+To rebuild the installer for an existing tag, run the **Release** workflow manually from the Actions tab.

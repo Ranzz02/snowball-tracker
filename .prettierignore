@@ -5,3 +5,7 @@ node_modules
 .yarn
 yarn.lock
 public
+
+# Written by release-please in its own format
+CHANGELOG.md
+.release-please-manifest.json
