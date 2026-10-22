@@ -93,7 +93,9 @@ export interface Payment {
 	note?: string;
 }
 
-export const SCHEMA_VERSION = 3;
+// Additive fields (such as the run snapshots) keep version 2, so builds that only know v2
+// can still open the file. Bump only for changes older builds would misread.
+export const SCHEMA_VERSION = 2;
 
 export interface AppData {
 	schemaVersion: typeof SCHEMA_VERSION;

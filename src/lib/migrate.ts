@@ -233,11 +233,11 @@ function pickRates(raw: Partial<Rates> | undefined): Rates {
 }
 
 /**
- * Fill gaps in a v2 or v3 file (older builds, hand-edited backups). v2 runs have no
- * target or completion bonus snapshot, so they take the current settings, which is
- * what v2 computed with, and totals stay the same.
+ * Fill gaps in a v2 file (older builds, hand-edited backups). Runs saved before the
+ * target and completion bonus snapshots existed take the current settings, which is
+ * what those builds computed with, so totals stay the same.
  */
-function normalize(raw: Partial<AppData>): AppData {
+function normalizeV2(raw: Partial<AppData>): AppData {
 	const empty = emptyAppData();
 	const rates = pickRates(raw.rates);
 	const requiredBossIds = raw.requiredBossIds ?? [];
@@ -262,12 +262,10 @@ function normalize(raw: Partial<AppData>): AppData {
 	};
 }
 
-/** Accepts v1 (four old files combined), v2 or v3 data and returns v3. */
+/** Accepts v1 (four old files combined) or v2 data and returns v2. */
 export function migrate(raw: unknown, bosses: Boss[]): AppData {
 	if (!raw || typeof raw !== 'object') return emptyAppData();
 	const data = raw as Record<string, unknown>;
-	if (data.schemaVersion === 2 || data.schemaVersion === SCHEMA_VERSION) {
-		return normalize(data as Partial<AppData>);
-	}
+	if (data.schemaVersion === SCHEMA_VERSION) return normalizeV2(data as Partial<AppData>);
 	return migrateV1(data as LegacyData, bosses);
 }

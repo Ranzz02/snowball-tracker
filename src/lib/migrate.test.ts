@@ -120,7 +120,7 @@ describe('migrate v1', () => {
 
 	it('marks old runs as having no hunter', () => {
 		expect(data.runs.r1.hunterId).toBe('');
-		expect(data.schemaVersion).toBe(3);
+		expect(data.schemaVersion).toBe(2);
 	});
 });
 
@@ -166,7 +166,7 @@ describe('migrate v2', () => {
 		expect(out.runs.r1.raids[0].rates).toEqual(defaultRates);
 	});
 
-	it('snapshots the current targets and completion bonus onto v2 runs', () => {
+	it('snapshots the current targets and completion bonus onto runs without them', () => {
 		const out = migrate(
 			{
 				schemaVersion: 2,
@@ -186,15 +186,14 @@ describe('migrate v2', () => {
 			},
 			bosses,
 		);
-		expect(out.schemaVersion).toBe(3);
 		expect(out.runs.r1.requiredBossIds).toEqual(['kaban']);
 		expect(out.runs.r1.completionBonus).toBe(123);
 	});
 
-	it('keeps v3 run snapshots as they are', () => {
+	it('keeps existing run snapshots as they are', () => {
 		const out = migrate(
 			{
-				schemaVersion: 3,
+				schemaVersion: 2,
 				rates: { ...defaultRates, completionBonus: 123 },
 				requiredBossIds: ['kaban'],
 				runs: {
