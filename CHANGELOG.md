@@ -4,6 +4,13 @@ All notable changes to this project are documented here. This file is generated 
 [release-please](https://github.com/googleapis/release-please) from
 [Conventional Commits](https://www.conventionalcommits.org).
 
+## [1.1.0](https://github.com/Ranzz02/snowball-tracker/compare/v1.0.0...v1.1.0) (2026-10-22)
+
+
+### Features
+
+* payout snapshots, safer saving, undo and ledger tools ([#4](https://github.com/Ranzz02/snowball-tracker/issues/4)) ([f19859c](https://github.com/Ranzz02/snowball-tracker/commit/f19859c6fa1a450a01ddcf1f641e92f8d82cd6ad))
+
 ## 1.0.0 (2026-10-22)
 
 ### Features
