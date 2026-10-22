@@ -263,7 +263,7 @@ export default function RaidEditor({
 								const ok = await confirmAction({
 									title: 'Delete raid?',
 									message:
-										'This removes the raid and its payouts. It cannot be undone.',
+										'This removes the raid and its payouts. Ctrl+Z brings it back.',
 									confirmLabel: 'Delete',
 									danger: true,
 								});

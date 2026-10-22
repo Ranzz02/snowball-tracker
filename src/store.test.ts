@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyAppData } from './models';
-import { friendIsUsed, useGameStore } from './store';
+import { clearHistory, friendIsUsed, redo, undo, useGameStore } from './store';
 
 describe('setHunterDied', () => {
 	let runId: string;
@@ -77,5 +77,52 @@ describe('friendIsUsed', () => {
 		data.payments = [{ id: 'p', friendId: 'f1', amount: 1, timestamp: '' }];
 		expect(friendIsUsed(data, 'f1')).toBe(true);
 		expect(friendIsUsed(data, 'f2')).toBe(false);
+	});
+});
+
+describe('undo', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useGameStore.setState({ ...emptyAppData() });
+		clearHistory();
+	});
+	afterEach(() => vi.useRealTimers());
+
+	const bonus = () => useGameStore.getState().rates.completionBonus;
+
+	it('groups quick changes into one step and redoes them', () => {
+		const before = bonus();
+		const s = useGameStore.getState();
+		s.setRates({ completionBonus: 1 });
+		s.setRates({ completionBonus: 12 });
+		undo();
+		expect(bonus()).toBe(before);
+		redo();
+		expect(bonus()).toBe(12);
+	});
+
+	it('keeps separate steps when changes are apart', () => {
+		const s = useGameStore.getState();
+		s.setRates({ completionBonus: 1 });
+		vi.advanceTimersByTime(1000);
+		s.setRates({ completionBonus: 2 });
+		undo();
+		expect(bonus()).toBe(1);
+	});
+
+	it('starts a new step for an edit right after an undo', () => {
+		const s = useGameStore.getState();
+		s.setRates({ completionBonus: 1 });
+		undo();
+		s.setRates({ completionBonus: 5 });
+		undo();
+		expect(useGameStore.temporal.getState().futureStates).toHaveLength(1);
+		redo();
+		expect(bonus()).toBe(5);
+	});
+
+	it('does not record navigation', () => {
+		useGameStore.getState().setActiveRun('x');
+		expect(useGameStore.temporal.getState().pastStates).toHaveLength(0);
 	});
 });
