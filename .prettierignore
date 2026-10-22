@@ -6,6 +6,5 @@ node_modules
 yarn.lock
 public
 
-# Written by release-please in its own format
+# Frozen 1.0.0 notes, kept in release-please's original format
 CHANGELOG.md
-.release-please-manifest.json

@@ -12,7 +12,7 @@ Yarn refuses package versions published less than a day ago. If an install fails
 
 ## Commit messages
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org), because the changelog and version numbers are generated from them:
+Commits follow [Conventional Commits](https://www.conventionalcommits.org), because releases, version numbers and release notes are generated from them:
 
 ```
 feat: add a "carried hunter" bonus preset
@@ -20,12 +20,12 @@ fix(ledger): count payments made before the first run
 docs: explain the hunter-death rule
 ```
 
-| Type                                                        | Effect on the next release              |
-| ----------------------------------------------------------- | --------------------------------------- |
-| `feat`                                                      | Minor version bump, listed in CHANGELOG |
-| `fix`, `perf`                                               | Patch version bump, listed in CHANGELOG |
-| `feat!` / `BREAKING CHANGE:` footer                         | Major version bump                      |
-| `docs`, `refactor`, `test`, `build`, `ci`, `chore`, `style` | No release on their own, not listed     |
+| Type                                                        | When merged into `main`                       |
+| ----------------------------------------------------------- | --------------------------------------------- |
+| `feat`                                                      | Releases a minor version, listed in the notes |
+| `fix`, `perf`, `revert`                                     | Releases a patch version, listed in the notes |
+| `feat!` / `BREAKING CHANGE:` footer                         | Releases a major version                      |
+| `docs`, `refactor`, `test`, `build`, `ci`, `chore`, `style` | No release                                    |
 
 A git hook (husky + commitlint, installed by `yarn install`) rejects messages that don't follow the format. Pull requests are squash-merged, so CI checks the **PR title** the same way.
 
@@ -56,9 +56,8 @@ Never store payout totals. The UI always computes them from raids through `src/l
 
 ## Releasing
 
-Releases are automated with [release-please](https://github.com/googleapis/release-please):
+Releases are automatic. Merging a pull request whose title releases (see the table above) into `main` runs the **Release** workflow. It works out the next version from the commits since the last tag, runs the tests, builds the Windows installer, and publishes the `vX.Y.Z` tag and GitHub release with the installer and grouped release notes. A failed build creates no tag, so the next merge picks the same changes up again.
 
-1. Merge `feat`/`fix` commits into `main`. release-please opens or updates a **release PR** (`chore(main): release x.y.z`) that bumps `package.json` and adds the new section to `CHANGELOG.md`.
-2. Merge the release PR when you want to ship. That creates the `vX.Y.Z` tag and GitHub release, then builds the Windows installer and attaches it.
+There is no release PR, and the version in `package.json` isn't bumped in the repo, because the tags are the source of truth. Run `node scripts/release.ts` to see what the next release would be.
 
-To rebuild the installer for an existing tag, run the **Release** workflow manually from the Actions tab.
+To rebuild the installer for an existing tag, run the **Release** workflow manually from the Actions tab and enter the tag.
