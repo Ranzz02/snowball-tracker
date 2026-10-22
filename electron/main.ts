@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { promises as fs, writeFileSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -176,18 +176,74 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 
 let win: BrowserWindow | null;
 
-function createWindow() {
+const windowStateFile = path.join(app.getPath('userData'), 'window-state.json');
+
+interface WindowState {
+	x?: number;
+	y?: number;
+	width: number;
+	height: number;
+	maximized?: boolean;
+}
+
+async function loadWindowState(): Promise<WindowState> {
+	const saved = (await readJson(windowStateFile)) as WindowState | null;
+	if (!saved || typeof saved.width !== 'number' || typeof saved.height !== 'number') {
+		return { width: 1280, height: 860 };
+	}
+	const size = { width: saved.width, height: saved.height, maximized: saved.maximized };
+	if (typeof saved.x !== 'number' || typeof saved.y !== 'number') return size;
+
+	// Forget the position when the monitor it was on is no longer there
+	const bounds = { x: saved.x, y: saved.y, width: saved.width, height: saved.height };
+	const area = screen.getDisplayMatching(bounds).workArea;
+	const visible =
+		bounds.x < area.x + area.width &&
+		bounds.x + bounds.width > area.x &&
+		bounds.y < area.y + area.height &&
+		bounds.y + bounds.height > area.y;
+	return visible ? { ...bounds, maximized: saved.maximized } : size;
+}
+
+// Only the app itself may load in the window; web links open in the browser
+function isAppUrl(url: string): boolean {
+	if (VITE_DEV_SERVER_URL) return url.startsWith(VITE_DEV_SERVER_URL);
+	return url.startsWith('file:');
+}
+
+function openExternal(url: string) {
+	if (/^https?:\/\//.test(url)) shell.openExternal(url);
+}
+
+async function createWindow() {
+	const state = await loadWindowState();
 	win = new BrowserWindow({
 		icon: path.join(process.env.VITE_PUBLIC as string, 'icon.png'),
-		width: 1280,
-		height: 860,
+		x: state.x,
+		y: state.y,
+		width: state.width,
+		height: state.height,
 		minWidth: 960,
 		minHeight: 640,
 		backgroundColor: '#0e0f0c',
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.mjs'),
+			contextIsolation: true,
+			nodeIntegration: false,
+			sandbox: true,
 		},
+	});
+	if (state.maximized) win.maximize();
+
+	win.webContents.setWindowOpenHandler(({ url }) => {
+		openExternal(url);
+		return { action: 'deny' };
+	});
+	win.webContents.on('will-navigate', (event, url) => {
+		if (isAppUrl(url)) return;
+		event.preventDefault();
+		openExternal(url);
 	});
 
 	// Let the renderer write pending changes before the window goes away
@@ -197,6 +253,18 @@ function createWindow() {
 		closing = true;
 		event.preventDefault();
 		const target = win;
+		if (target) {
+			const state: WindowState = {
+				...target.getNormalBounds(),
+				maximized: target.isMaximized(),
+			};
+			// Sync: the app may quit as soon as the window is destroyed
+			try {
+				writeFileSync(windowStateFile, JSON.stringify(state));
+			} catch (e) {
+				console.error('Could not save window state:', e);
+			}
+		}
 		const finish = () => {
 			if (target && !target.isDestroyed()) target.destroy();
 		};
