@@ -7,4 +7,10 @@ contextBridge.exposeInMainWorld('api', {
 	exportData: (data: unknown): Promise<string | null> => ipcRenderer.invoke('export-data', data),
 	importData: (): Promise<unknown | null> => ipcRenderer.invoke('import-data'),
 	openDataFolder: (): Promise<void> => ipcRenderer.invoke('open-data-folder'),
+	onFlushRequest: (flush: () => Promise<void>) => {
+		ipcRenderer.on('flush-request', async () => {
+			await flush().catch(() => {});
+			ipcRenderer.send('flush-done');
+		});
+	},
 });

@@ -196,7 +196,8 @@ function DataPanel() {
 				</Button>
 			</div>
 			<p className="mt-3 text-xs text-mute">
-				Data saves automatically as one JSON file in the app data folder.
+				Data saves automatically as one JSON file in the app data folder. A copy is kept
+				each day in its backups folder (the last 14 days).
 			</p>
 		</Panel>
 	);

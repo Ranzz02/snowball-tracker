@@ -20,6 +20,7 @@ import {
 import { migrate } from './lib/migrate';
 import { newId } from './lib/format';
 import { requiredIds } from './lib/payouts';
+import { toast } from './components/ui/feedback';
 
 export const BOSSES: Boss[] = bossData as Boss[];
 export const MAPS: GameMap[] = mapData as GameMap[];
@@ -403,14 +404,23 @@ async function loadAndWatch() {
 	let last = JSON.stringify(toAppData(useGameStore.getState()));
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
-	const flush = () => {
+	let warned = false;
+	const flush = async () => {
 		clearTimeout(timer);
 		timer = undefined;
 		const current = toAppData(useGameStore.getState());
 		const json = JSON.stringify(current);
 		if (json === last) return;
-		last = json;
-		window.api.saveData(current).catch((e) => console.error('Save failed', e));
+		try {
+			await window.api.saveData(current);
+			last = json;
+			warned = false;
+		} catch (e) {
+			// `last` stays stale, so the next change retries the whole state
+			console.error('Save failed', e);
+			if (!warned) toast('Could not save changes. Retrying on the next edit.', 'danger');
+			warned = true;
+		}
 	};
 
 	// A first launch after upgrading writes the migrated file straight away
@@ -423,5 +433,6 @@ async function loadAndWatch() {
 		clearTimeout(timer);
 		timer = setTimeout(flush, 300);
 	});
-	window.addEventListener('beforeunload', flush);
+	window.api.onFlushRequest(flush);
+	window.addEventListener('beforeunload', () => void flush());
 }

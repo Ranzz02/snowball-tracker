@@ -29,5 +29,7 @@ interface Window {
 		exportData: (data: unknown) => Promise<string | null>;
 		importData: () => Promise<unknown | null>;
 		openDataFolder: () => Promise<void>;
+		/** Main asks the renderer to save pending changes before the window closes. */
+		onFlushRequest: (flush: () => Promise<void>) => void;
 	};
 }

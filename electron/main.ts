@@ -74,9 +74,46 @@ ipcMain.handle('load-data', async () => {
 	return loadLegacy();
 });
 
-ipcMain.handle('save-data', async (_event, data: unknown) => {
-	await fs.mkdir(dataDir, { recursive: true });
-	await writeJsonAtomic(dataFile, data);
+const backupDir = path.join(dataDir, 'backups');
+const KEEP_BACKUPS = 14;
+const BACKUP_NAME = /^app-data-\d{4}-\d{2}-\d{2}\.json$/;
+
+// Before the first save of each day, keep a copy of the file as it was
+async function dailyBackup(): Promise<void> {
+	const day = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, local time
+	const target = path.join(backupDir, `app-data-${day}.json`);
+	try {
+		await fs.access(target);
+		return;
+	} catch {
+		// No backup yet today
+	}
+	try {
+		await fs.mkdir(backupDir, { recursive: true });
+		await fs.copyFile(dataFile, target);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+			console.error('Daily backup failed:', error);
+		}
+		return;
+	}
+	const old = (await fs.readdir(backupDir)).filter((f) => BACKUP_NAME.test(f)).sort();
+	for (const name of old.slice(0, -KEEP_BACKUPS)) {
+		await fs.rm(path.join(backupDir, name)).catch(() => {});
+	}
+}
+
+// Saves run one at a time so two writes can't race on the same temp file
+let saveQueue: Promise<void> = Promise.resolve();
+
+ipcMain.handle('save-data', (_event, data: unknown) => {
+	const save = saveQueue.then(async () => {
+		await fs.mkdir(dataDir, { recursive: true });
+		await dailyBackup();
+		await writeJsonAtomic(dataFile, data);
+	});
+	saveQueue = save.catch(() => {});
+	return save;
 });
 
 ipcMain.handle('export-data', async (event, data: unknown) => {
@@ -153,6 +190,21 @@ function createWindow() {
 		},
 	});
 
+	// Let the renderer write pending changes before the window goes away
+	let closing = false;
+	win.on('close', (event) => {
+		if (closing) return;
+		closing = true;
+		event.preventDefault();
+		const target = win;
+		const finish = () => {
+			if (target && !target.isDestroyed()) target.destroy();
+		};
+		ipcMain.once('flush-done', finish);
+		setTimeout(finish, 2000);
+		target?.webContents.send('flush-request');
+	});
+
 	if (VITE_DEV_SERVER_URL) {
 		win.loadURL(VITE_DEV_SERVER_URL);
 	} else {
@@ -178,4 +230,14 @@ app.on('activate', () => {
 	}
 });
 
-app.whenReady().then(createWindow);
+// A second copy would overwrite the same data file, so focus the first one instead
+if (!app.requestSingleInstanceLock()) {
+	app.quit();
+} else {
+	app.on('second-instance', () => {
+		if (!win || win.isDestroyed()) return;
+		if (win.isMinimized()) win.restore();
+		win.focus();
+	});
+	app.whenReady().then(createWindow);
+}
