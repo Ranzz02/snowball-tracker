@@ -1,7 +1,18 @@
-import type { AppData, Boss, Raid, Rates, Run } from '../models';
+import type { AppData, Boss, Raid, Run } from '../models';
 
 export type Category =
 	'base' | 'pmc' | 'extract' | 'died' | 'teamKill' | 'hunterDeath' | 'completion' | 'adjustment';
+
+export const CATEGORY_LABELS: Record<Category, string> = {
+	base: 'Base',
+	pmc: 'PMC kills',
+	extract: 'Extracts',
+	died: 'Deaths',
+	teamKill: 'Team kills',
+	hunterDeath: 'Hunter deaths',
+	completion: 'Completion',
+	adjustment: 'Custom',
+};
 
 export interface Line {
 	category: Category;
@@ -73,12 +84,11 @@ export function raidLines(raid: Raid): FriendLines {
 
 export interface BossContext {
 	bosses: Boss[];
-	requiredBossIds: string[]; // empty = all
-	rates: Rates; // current settings, used for the completion bonus
 }
 
-export const requiredIds = (ctx: BossContext) =>
-	ctx.requiredBossIds.length > 0 ? ctx.requiredBossIds : ctx.bosses.map((b) => b.id);
+/** Bosses that count for this run; its empty snapshot means all bosses. */
+export const requiredIds = (run: Run, ctx: BossContext) =>
+	run.requiredBossIds.length > 0 ? run.requiredBossIds : ctx.bosses.map((b) => b.id);
 
 export interface BossProgress {
 	required: string[];
@@ -87,7 +97,7 @@ export interface BossProgress {
 }
 
 export function bossProgress(run: Run, ctx: BossContext): BossProgress {
-	const required = requiredIds(ctx);
+	const required = requiredIds(run, ctx);
 	// A hunter death ends the run, and kills from that raid are lost to the achievement
 	const killedSet = new Set(
 		run.raids
@@ -123,16 +133,16 @@ export function runBreakdown(run: Run, ctx: BossContext): RunBreakdown {
 
 	const completion: FriendLines = {};
 	const done = bossProgress(run, ctx).remaining.length === 0;
-	if (run.status === 'completed' && done && ctx.rates.completionBonus !== 0) {
+	if (run.status === 'completed' && done && run.completionBonus !== 0) {
 		for (const fid of Object.keys(totals)) {
 			completion[fid] = [
 				{
 					category: 'completion',
 					label: 'Achievement complete',
-					amount: ctx.rates.completionBonus,
+					amount: run.completionBonus,
 				},
 			];
-			add(fid, ctx.rates.completionBonus);
+			add(fid, run.completionBonus);
 		}
 	}
 
@@ -154,11 +164,7 @@ export interface LedgerEntry {
 }
 
 export function ledger(data: AppData, bosses: Boss[]): Record<string, LedgerEntry> {
-	const ctx: BossContext = {
-		bosses,
-		requiredBossIds: data.requiredBossIds,
-		rates: data.rates,
-	};
+	const ctx: BossContext = { bosses };
 	const out: Record<string, LedgerEntry> = {};
 	const entry = (friendId: string): LedgerEntry =>
 		(out[friendId] ??= {

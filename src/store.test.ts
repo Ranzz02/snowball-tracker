@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyAppData } from './models';
-import { useGameStore } from './store';
+import { clearHistory, friendIsUsed, redo, undo, useGameStore } from './store';
 
 describe('setHunterDied', () => {
 	let runId: string;
@@ -32,5 +32,120 @@ describe('setHunterDied', () => {
 		useGameStore.getState().endRun(runId, 'completed');
 		useGameStore.getState().setHunterDied(runId, raidId, false);
 		expect(run().status).toBe('completed');
+	});
+});
+
+describe('run snapshots', () => {
+	beforeEach(() => useGameStore.setState({ ...emptyAppData() }));
+
+	it('copies targets and completion bonus when a run starts', () => {
+		const s = useGameStore.getState();
+		s.setRequiredBossIds(['killa']);
+		s.setRates({ completionBonus: 42 });
+		const id = s.startRun('hunter', ['helper']);
+		s.setRequiredBossIds([]);
+		s.setRates({ completionBonus: 7 });
+		const run = useGameStore.getState().runs[id];
+		expect(run.requiredBossIds).toEqual(['killa']);
+		expect(run.completionBonus).toBe(42);
+	});
+
+	it('applyRatesToRun refreshes rates and bonus but not targets', () => {
+		const s = useGameStore.getState();
+		const id = s.startRun('hunter', []);
+		s.setRequiredBossIds(['killa']);
+		s.setRates({ completionBonus: 9 });
+		s.applyRatesToRun(id);
+		const run = useGameStore.getState().runs[id];
+		expect(run.requiredBossIds).toEqual([]);
+		expect(run.completionBonus).toBe(9);
+	});
+
+	it('applyTargetsToRun refreshes only the targets', () => {
+		const s = useGameStore.getState();
+		const id = s.startRun('hunter', []);
+		const raidId = s.addRaid(id, 'customs')!;
+		s.setRaidRates(id, raidId, { pmcKill: 1 });
+		s.setRequiredBossIds(['killa']);
+		s.applyTargetsToRun(id);
+		const run = useGameStore.getState().runs[id];
+		expect(run.requiredBossIds).toEqual(['killa']);
+		expect(run.raids[0].rates.pmcKill).toBe(1);
+	});
+
+	it('only targets bosses the run still needs on the map', () => {
+		const s = useGameStore.getState();
+		s.setRequiredBossIds(['tagilla']);
+		const id = s.startRun('hunter', []);
+		const raidId = s.addRaid(id, 'interchange')!;
+		const raid = useGameStore.getState().runs[id].raids.find((r) => r.id === raidId)!;
+		expect(raid.bosses.map((b) => b.bossId)).toEqual(['tagilla']);
+	});
+});
+
+describe('friendIsUsed', () => {
+	it('counts payments as use', () => {
+		const data = emptyAppData();
+		data.payments = [{ id: 'p', friendId: 'f1', amount: 1, timestamp: '' }];
+		expect(friendIsUsed(data, 'f1')).toBe(true);
+		expect(friendIsUsed(data, 'f2')).toBe(false);
+	});
+});
+
+describe('undo', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		useGameStore.setState({ ...emptyAppData() });
+		clearHistory();
+	});
+	afterEach(() => vi.useRealTimers());
+
+	const bonus = () => useGameStore.getState().rates.completionBonus;
+
+	it('groups quick edits of the same field into one step and redoes them', () => {
+		const before = bonus();
+		const s = useGameStore.getState();
+		s.setRates({ completionBonus: 1 });
+		s.setRates({ completionBonus: 12 });
+		undo();
+		expect(bonus()).toBe(before);
+		redo();
+		expect(bonus()).toBe(12);
+	});
+
+	it('keeps separate steps when changes are apart', () => {
+		const s = useGameStore.getState();
+		s.setRates({ completionBonus: 1 });
+		vi.advanceTimersByTime(1500);
+		s.setRates({ completionBonus: 2 });
+		undo();
+		expect(bonus()).toBe(1);
+	});
+
+	it('keeps quick discrete actions as separate steps', () => {
+		const s = useGameStore.getState();
+		const id = s.startRun('hunter', []);
+		const raidId = s.addRaid(id, 'interchange')!;
+		s.toggleBossKilled(id, raidId, 'killa', true);
+		undo();
+		const run = useGameStore.getState().runs[id];
+		expect(run.raids).toHaveLength(1);
+		expect(run.raids[0].bosses.every((b) => !b.killed)).toBe(true);
+	});
+
+	it('starts a new step for an edit right after an undo', () => {
+		const s = useGameStore.getState();
+		s.setRates({ completionBonus: 1 });
+		undo();
+		s.setRates({ completionBonus: 5 });
+		undo();
+		expect(useGameStore.temporal.getState().futureStates).toHaveLength(1);
+		redo();
+		expect(bonus()).toBe(5);
+	});
+
+	it('does not record navigation', () => {
+		useGameStore.getState().setActiveRun('x');
+		expect(useGameStore.temporal.getState().pastStates).toHaveLength(0);
 	});
 });

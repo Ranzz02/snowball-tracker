@@ -49,7 +49,7 @@ function RunCard({ run }: { run: Run }) {
 					onClick={async () => {
 						const ok = await confirmAction({
 							title: 'Delete run?',
-							message: `This removes the run from ${formatDate(run.createdAt)} and all its raids. It cannot be undone.`,
+							message: `This removes the run from ${formatDate(run.createdAt)} and all its raids. Ctrl+Z brings it back.`,
 							confirmLabel: 'Delete',
 							danger: true,
 						});

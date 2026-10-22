@@ -23,7 +23,7 @@ function RatesPanel() {
 							const ok = await confirmAction({
 								title: 'Apply to current run?',
 								message:
-									'Overwrites the rates of every raid in the open run, including hand-edited ones.',
+									'Overwrites the rates of every raid in the open run, including hand-edited ones, and its completion bonus.',
 								confirmLabel: 'Apply',
 							});
 							if (ok) {
@@ -38,8 +38,9 @@ function RatesPanel() {
 			}
 		>
 			<p className="mb-4 text-xs text-mute">
-				These are copied into each new raid. Changing them here does not touch existing
-				raids. Penalties are entered as positive numbers.
+				These are copied into each new raid (the completion bonus into each new run).
+				Changing them here does not touch existing raids or runs. Penalties are entered as
+				positive numbers.
 			</p>
 			<div className="grid gap-4 md:grid-cols-2">
 				{RATE_FIELDS.map((f) => (
@@ -124,6 +125,8 @@ function TargetsPanel() {
 	const bosses = useGameStore((s) => s.bosses);
 	const required = useGameStore((s) => s.requiredBossIds);
 	const setRequired = useGameStore((s) => s.setRequiredBossIds);
+	const activeRunId = useGameStore((s) => s.activeRunId);
+	const applyTargetsToRun = useGameStore((s) => s.applyTargetsToRun);
 	const active = required.length > 0 ? required : bosses.map((b) => b.id);
 
 	const toggle = (id: string, on: boolean) => {
@@ -136,13 +139,27 @@ function TargetsPanel() {
 		<Panel
 			title="Achievement targets"
 			actions={
-				<Button size="sm" variant="ghost" onClick={() => setRequired([])}>
-					Select all
-				</Button>
+				<>
+					<Button size="sm" variant="ghost" onClick={() => setRequired([])}>
+						Select all
+					</Button>
+					{activeRunId && (
+						<Button
+							size="sm"
+							onClick={() => {
+								applyTargetsToRun(activeRunId);
+								toast('Targets applied to the open run');
+							}}
+						>
+							Apply to open run
+						</Button>
+					)}
+				</>
 			}
 		>
 			<p className="mb-3 text-xs text-mute">
-				Bosses that count toward the progress bar and the completion bonus.
+				Bosses that count toward the progress bar and the completion bonus. Copied into each
+				new run; use "Apply to open run" here to update the current one.
 			</p>
 			<div className="flex flex-wrap gap-2">
 				{bosses.map((b) => (
@@ -194,7 +211,8 @@ function DataPanel() {
 				</Button>
 			</div>
 			<p className="mt-3 text-xs text-mute">
-				Data saves automatically as one JSON file in the app data folder.
+				Data saves automatically as one JSON file in the app data folder. A copy is kept
+				each day in its backups folder (the last 14 days).
 			</p>
 		</Panel>
 	);

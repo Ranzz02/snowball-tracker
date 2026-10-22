@@ -31,5 +31,4 @@ export const formatDateTime = (iso: string) =>
 		minute: '2-digit',
 	});
 
-export const newId = (prefix: string) =>
-	`${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+export const newId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;

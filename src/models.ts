@@ -74,6 +74,9 @@ export interface Run {
 	squad: string[];
 	raids: Raid[];
 	notes: string;
+	// Snapshots taken when the run starts, so later Settings changes don't rewrite finished runs
+	requiredBossIds: string[]; // empty = all bosses
+	completionBonus: number;
 }
 
 export interface Preset {
@@ -90,14 +93,18 @@ export interface Payment {
 	note?: string;
 }
 
+// Additive fields (such as the run snapshots) keep version 2, so builds that only know v2
+// can still open the file. Bump only for changes older builds would misread.
+export const SCHEMA_VERSION = 2;
+
 export interface AppData {
-	schemaVersion: 2;
+	schemaVersion: typeof SCHEMA_VERSION;
 	friends: Friend[];
 	runs: Record<string, Run>;
 	activeRunId: string | null;
 	rates: Rates;
 	presets: Preset[];
-	requiredBossIds: string[]; // empty = all bosses
+	requiredBossIds: string[]; // empty = all bosses, copied into each new run
 	payments: Payment[];
 }
 
@@ -119,7 +126,7 @@ export const defaultPresets: Preset[] = [
 
 export function emptyAppData(): AppData {
 	return {
-		schemaVersion: 2,
+		schemaVersion: SCHEMA_VERSION,
 		friends: [],
 		runs: {},
 		activeRunId: null,

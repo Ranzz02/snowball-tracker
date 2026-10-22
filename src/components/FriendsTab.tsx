@@ -53,7 +53,7 @@ function FriendRow({ friend }: { friend: Friend }) {
 		if (friendIsUsed(toAppData(useGameStore.getState()), friend.id)) {
 			await confirmAction({
 				title: 'Cannot delete',
-				message: `${friend.name} appears in past runs. Archive them instead to keep the history.`,
+				message: `${friend.name} appears in past runs or payments. Archive them instead to keep the history.`,
 				confirmLabel: 'OK',
 			});
 			return;

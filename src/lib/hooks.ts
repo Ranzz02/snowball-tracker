@@ -5,9 +5,7 @@ import type { Friend } from '../models';
 
 export function useBossContext(): BossContext {
 	const bosses = useGameStore((s) => s.bosses);
-	const requiredBossIds = useGameStore((s) => s.requiredBossIds);
-	const rates = useGameStore((s) => s.rates);
-	return useMemo(() => ({ bosses, requiredBossIds, rates }), [bosses, requiredBossIds, rates]);
+	return useMemo(() => ({ bosses }), [bosses]);
 }
 
 export function useFriendMap(): Record<string, Friend> {

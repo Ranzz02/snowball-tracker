@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
+import { temporal } from 'zundo';
 import bossData from './data/bosses.json';
 import mapData from './data/maps.json';
 import {
 	emptyAppData,
+	SCHEMA_VERSION,
 	type AppData,
 	type Boss,
 	type Friend,
@@ -18,6 +20,8 @@ import {
 } from './models';
 import { migrate } from './lib/migrate';
 import { newId } from './lib/format';
+import { requiredIds } from './lib/payouts';
+import { toast } from './components/ui/feedback';
 
 export const BOSSES: Boss[] = bossData as Boss[];
 export const MAPS: GameMap[] = mapData as GameMap[];
@@ -65,6 +69,7 @@ interface Actions {
 	// Settings
 	setRates: (patch: Partial<Rates>) => void;
 	applyRatesToRun: (runId: string) => void;
+	applyTargetsToRun: (runId: string) => void;
 	savePreset: (preset: Preset) => void;
 	deletePreset: (presetId: string) => void;
 	setRequiredBossIds: (ids: string[]) => void;
@@ -76,6 +81,7 @@ interface Actions {
 
 	// Payments
 	addPayment: (payment: Omit<Payment, 'id' | 'timestamp'>) => void;
+	addPayments: (payments: Omit<Payment, 'id' | 'timestamp'>[]) => void;
 	removePayment: (paymentId: string) => void;
 
 	// Data
@@ -91,7 +97,7 @@ interface Runtime {
 export type Store = AppData & Runtime & Actions;
 
 export const toAppData = (s: AppData): AppData => ({
-	schemaVersion: 2,
+	schemaVersion: SCHEMA_VERSION,
 	friends: s.friends,
 	runs: s.runs,
 	activeRunId: s.activeRunId,
@@ -112,269 +118,355 @@ function newHelper(friendId: string): RaidHelper {
 	};
 }
 
+// Undo history covers the saved data, not navigation (activeRunId) or runtime fields
+type History = Omit<AppData, 'schemaVersion' | 'activeRunId'>;
+const HISTORY_KEYS = [
+	'friends',
+	'runs',
+	'rates',
+	'presets',
+	'requiredBossIds',
+	'payments',
+] as const satisfies readonly (keyof History)[];
+
+// Repeated edits of one field (typing a note, a rate) less than this apart are one undo
+// step. Discrete actions (toggles, adds, deletes) are always a step of their own.
+const UNDO_GROUP_MS = 1000;
+let editKey: string | null = null; // set while a groupable edit runs
+let lastKey: string | null = null; // reset after undo, redo and clear to start a new step
+let lastChange = 0;
+
+const editing = (key: string, fn: () => void) => {
+	editKey = key;
+	try {
+		fn();
+	} finally {
+		editKey = null;
+	}
+};
+
 export const useGameStore = create<Store>()(
-	immer((set, get) => {
-		// Run `fn` on one raid inside the immer draft; missing run/raid is a no-op
-		const withRaid = (runId: string, raidId: string, fn: (raid: Raid, run: Run) => void) =>
-			set((s) => {
-				const run = s.runs[runId];
-				const raid = run?.raids.find((r) => r.id === raidId);
-				if (run && raid) fn(raid, run);
-			});
-
-		return {
-			...emptyAppData(),
-			ready: false,
-			bosses: BOSSES,
-			maps: MAPS,
-
-			startRun: (hunterId, squad) => {
-				const id = newId('run');
+	temporal(
+		immer((set, get) => {
+			// Run `fn` on one raid inside the immer draft; missing run/raid is a no-op
+			const withRaid = (runId: string, raidId: string, fn: (raid: Raid, run: Run) => void) =>
 				set((s) => {
-					s.runs[id] = {
-						id,
-						createdAt: new Date().toISOString(),
-						status: 'active',
-						hunterId,
-						squad: squad.filter((f) => f !== hunterId),
-						raids: [],
-						notes: '',
-					};
-					s.activeRunId = id;
+					const run = s.runs[runId];
+					const raid = run?.raids.find((r) => r.id === raidId);
+					if (run && raid) fn(raid, run);
 				});
-				return id;
-			},
 
-			setActiveRun: (runId) =>
-				set((s) => {
-					s.activeRunId = runId;
-				}),
+			return {
+				...emptyAppData(),
+				ready: false,
+				bosses: BOSSES,
+				maps: MAPS,
 
-			endRun: (runId, status) =>
-				set((s) => {
-					const run = s.runs[runId];
-					if (!run) return;
-					run.status = status;
-					run.endedAt = new Date().toISOString();
-				}),
-
-			reopenRun: (runId) =>
-				set((s) => {
-					const run = s.runs[runId];
-					if (!run) return;
-					run.status = 'active';
-					run.endedAt = undefined;
-				}),
-
-			deleteRun: (runId) =>
-				set((s) => {
-					delete s.runs[runId];
-					if (s.activeRunId === runId) s.activeRunId = null;
-				}),
-
-			setHunter: (runId, hunterId) =>
-				set((s) => {
-					const run = s.runs[runId];
-					if (!run) return;
-					run.hunterId = hunterId;
-					run.squad = run.squad.filter((f) => f !== hunterId);
-				}),
-
-			setSquad: (runId, squad) =>
-				set((s) => {
-					const run = s.runs[runId];
-					if (run) run.squad = squad.filter((f) => f !== run.hunterId);
-				}),
-
-			setRunNotes: (runId, notes) =>
-				set((s) => {
-					const run = s.runs[runId];
-					if (run) run.notes = notes;
-				}),
-
-			addRaid: (runId, mapId) => {
-				const s = get();
-				const run = s.runs[runId];
-				if (!run) return null;
-
-				// Bosses that spawn here and still matter for this run
-				const onMap = s.bosses.filter((b) => b.maps?.includes(mapId));
-				const killed = new Set(
-					run.raids.flatMap((r) => r.bosses.filter((b) => b.killed).map((b) => b.bossId)),
-				);
-				const required = new Set(
-					s.requiredBossIds.length > 0 ? s.requiredBossIds : s.bosses.map((b) => b.id),
-				);
-				const wanted = onMap.filter((b) => required.has(b.id) && !killed.has(b.id));
-				const targets = wanted.length > 0 ? wanted : onMap;
-
-				const id = newId('raid');
-				set((d) => {
-					d.runs[runId].raids.push({
-						id,
-						mapId,
-						createdAt: new Date().toISOString(),
-						notes: '',
-						hunterDied: false,
-						rates: { ...d.rates },
-						bosses: targets.map((b) => ({
-							bossId: b.id,
-							killed: false,
-						})),
-						helpers: Object.fromEntries(run.squad.map((f) => [f, newHelper(f)])),
+				startRun: (hunterId, squad) => {
+					const id = newId('run');
+					set((s) => {
+						s.runs[id] = {
+							id,
+							createdAt: new Date().toISOString(),
+							status: 'active',
+							hunterId,
+							squad: squad.filter((f) => f !== hunterId),
+							raids: [],
+							notes: '',
+							requiredBossIds: [...s.requiredBossIds],
+							completionBonus: s.rates.completionBonus,
+						};
+						s.activeRunId = id;
 					});
-				});
-				return id;
-			},
+					return id;
+				},
 
-			deleteRaid: (runId, raidId) =>
-				set((s) => {
-					const run = s.runs[runId];
-					if (run) run.raids = run.raids.filter((r) => r.id !== raidId);
-				}),
+				setActiveRun: (runId) =>
+					set((s) => {
+						s.activeRunId = runId;
+					}),
 
-			setRaidNotes: (runId, raidId, notes) =>
-				withRaid(runId, raidId, (raid) => {
-					raid.notes = notes;
-				}),
-
-			setRaidRates: (runId, raidId, patch) =>
-				withRaid(runId, raidId, (raid) => {
-					Object.assign(raid.rates, patch);
-				}),
-
-			toggleBossKilled: (runId, raidId, bossId, killed) =>
-				withRaid(runId, raidId, (raid) => {
-					const b = raid.bosses.find((x) => x.bossId === bossId);
-					if (!b) return;
-					b.killed = killed;
-					b.killedAt = killed ? new Date().toISOString() : undefined;
-				}),
-
-			// A hunter death ends the run; clearing the last one (a mis-click) reopens it
-			setHunterDied: (runId, raidId, died) =>
-				withRaid(runId, raidId, (raid, run) => {
-					raid.hunterDied = died;
-					if (died && run.status === 'active') {
-						run.status = 'abandoned';
+				endRun: (runId, status) =>
+					set((s) => {
+						const run = s.runs[runId];
+						if (!run) return;
+						run.status = status;
 						run.endedAt = new Date().toISOString();
-					} else if (
-						!died &&
-						run.status === 'abandoned' &&
-						!run.raids.some((r) => r.hunterDied)
-					) {
+					}),
+
+				reopenRun: (runId) =>
+					set((s) => {
+						const run = s.runs[runId];
+						if (!run) return;
 						run.status = 'active';
 						run.endedAt = undefined;
-					}
-				}),
+					}),
 
-			addHelper: (runId, raidId, friendId) =>
-				withRaid(runId, raidId, (raid) => {
-					raid.helpers[friendId] ??= newHelper(friendId);
-				}),
+				deleteRun: (runId) =>
+					set((s) => {
+						delete s.runs[runId];
+						if (s.activeRunId === runId) s.activeRunId = null;
+					}),
 
-			removeHelper: (runId, raidId, friendId) =>
-				withRaid(runId, raidId, (raid) => {
-					delete raid.helpers[friendId];
-				}),
+				setHunter: (runId, hunterId) =>
+					set((s) => {
+						const run = s.runs[runId];
+						if (!run) return;
+						run.hunterId = hunterId;
+						run.squad = run.squad.filter((f) => f !== hunterId);
+					}),
 
-			setHelperField: (runId, raidId, friendId, patch) =>
-				withRaid(runId, raidId, (raid) => {
-					const h = raid.helpers[friendId];
-					if (!h) return;
-					if (patch.pmcKills !== undefined) h.pmcKills = Math.max(0, patch.pmcKills);
-					if (patch.teamKills !== undefined) h.teamKills = Math.max(0, patch.teamKills);
-					if (patch.died !== undefined) h.died = patch.died;
-					if (patch.extracted !== undefined) h.extracted = patch.extracted;
-				}),
+				setSquad: (runId, squad) =>
+					set((s) => {
+						const run = s.runs[runId];
+						if (run) run.squad = squad.filter((f) => f !== run.hunterId);
+					}),
 
-			addAdjustment: (runId, raidId, friendId, adj) =>
-				withRaid(runId, raidId, (raid) => {
-					raid.helpers[friendId]?.adjustments.push({
-						id: newId('adj'),
-						amount: adj.amount,
-						reason: adj.reason,
-						presetId: adj.presetId,
-						timestamp: new Date().toISOString(),
-					});
-				}),
+				setRunNotes: (runId, notes) =>
+					editing(`runNotes:${runId}`, () =>
+						set((s) => {
+							const run = s.runs[runId];
+							if (run) run.notes = notes;
+						}),
+					),
 
-			removeAdjustment: (runId, raidId, friendId, adjustmentId) =>
-				withRaid(runId, raidId, (raid) => {
-					const h = raid.helpers[friendId];
-					if (h) h.adjustments = h.adjustments.filter((a) => a.id !== adjustmentId);
-				}),
-
-			setRates: (patch) =>
-				set((s) => {
-					Object.assign(s.rates, patch);
-				}),
-
-			applyRatesToRun: (runId) =>
-				set((s) => {
+				addRaid: (runId, mapId) => {
+					const s = get();
 					const run = s.runs[runId];
-					if (!run) return;
-					for (const raid of run.raids) raid.rates = { ...s.rates };
-				}),
+					if (!run) return null;
 
-			savePreset: (preset) =>
-				set((s) => {
-					const i = s.presets.findIndex((p) => p.id === preset.id);
-					if (i >= 0) s.presets[i] = preset;
-					else s.presets.push(preset);
-				}),
+					// Bosses that spawn here and still matter for this run
+					const onMap = s.bosses.filter((b) => b.maps?.includes(mapId));
+					const killed = new Set(
+						run.raids.flatMap((r) =>
+							r.bosses.filter((b) => b.killed).map((b) => b.bossId),
+						),
+					);
+					const required = new Set(requiredIds(run, s));
+					const wanted = onMap.filter((b) => required.has(b.id) && !killed.has(b.id));
+					const targets = wanted.length > 0 ? wanted : onMap;
 
-			deletePreset: (presetId) =>
-				set((s) => {
-					s.presets = s.presets.filter((p) => p.id !== presetId);
-				}),
-
-			setRequiredBossIds: (ids) =>
-				set((s) => {
-					s.requiredBossIds = ids;
-				}),
-
-			addFriend: (name, color) =>
-				set((s) => {
-					s.friends.push({
-						id: newId('friend'),
-						name: name.trim(),
-						color,
+					const id = newId('raid');
+					set((d) => {
+						d.runs[runId].raids.push({
+							id,
+							mapId,
+							createdAt: new Date().toISOString(),
+							notes: '',
+							hunterDied: false,
+							rates: { ...d.rates },
+							bosses: targets.map((b) => ({
+								bossId: b.id,
+								killed: false,
+							})),
+							helpers: Object.fromEntries(run.squad.map((f) => [f, newHelper(f)])),
+						});
 					});
-				}),
+					return id;
+				},
 
-			updateFriend: (friendId, patch) =>
-				set((s) => {
-					const f = s.friends.find((x) => x.id === friendId);
-					if (f) Object.assign(f, patch);
-				}),
+				deleteRaid: (runId, raidId) =>
+					set((s) => {
+						const run = s.runs[runId];
+						if (run) run.raids = run.raids.filter((r) => r.id !== raidId);
+					}),
 
-			deleteFriend: (friendId) =>
-				set((s) => {
-					s.friends = s.friends.filter((f) => f.id !== friendId);
-				}),
+				setRaidNotes: (runId, raidId, notes) =>
+					editing(`raidNotes:${raidId}`, () =>
+						withRaid(runId, raidId, (raid) => {
+							raid.notes = notes;
+						}),
+					),
 
-			addPayment: (payment) =>
-				set((s) => {
-					s.payments.push({
-						...payment,
-						id: newId('pay'),
-						timestamp: new Date().toISOString(),
-					});
-				}),
+				setRaidRates: (runId, raidId, patch) =>
+					editing(`raidRates:${raidId}:${Object.keys(patch).join()}`, () =>
+						withRaid(runId, raidId, (raid) => {
+							Object.assign(raid.rates, patch);
+						}),
+					),
 
-			removePayment: (paymentId) =>
-				set((s) => {
-					s.payments = s.payments.filter((p) => p.id !== paymentId);
-				}),
+				toggleBossKilled: (runId, raidId, bossId, killed) =>
+					withRaid(runId, raidId, (raid) => {
+						const b = raid.bosses.find((x) => x.bossId === bossId);
+						if (!b) return;
+						b.killed = killed;
+						b.killedAt = killed ? new Date().toISOString() : undefined;
+					}),
 
-			replaceData: (data) => set(() => ({ ...toAppData(data) })),
-		};
-	}),
+				// A hunter death ends the run; clearing the last one (a mis-click) reopens it
+				setHunterDied: (runId, raidId, died) =>
+					withRaid(runId, raidId, (raid, run) => {
+						raid.hunterDied = died;
+						if (died && run.status === 'active') {
+							run.status = 'abandoned';
+							run.endedAt = new Date().toISOString();
+						} else if (
+							!died &&
+							run.status === 'abandoned' &&
+							!run.raids.some((r) => r.hunterDied)
+						) {
+							run.status = 'active';
+							run.endedAt = undefined;
+						}
+					}),
+
+				addHelper: (runId, raidId, friendId) =>
+					withRaid(runId, raidId, (raid) => {
+						raid.helpers[friendId] ??= newHelper(friendId);
+					}),
+
+				removeHelper: (runId, raidId, friendId) =>
+					withRaid(runId, raidId, (raid) => {
+						delete raid.helpers[friendId];
+					}),
+
+				setHelperField: (runId, raidId, friendId, patch) =>
+					withRaid(runId, raidId, (raid) => {
+						const h = raid.helpers[friendId];
+						if (!h) return;
+						if (patch.pmcKills !== undefined) h.pmcKills = Math.max(0, patch.pmcKills);
+						if (patch.teamKills !== undefined)
+							h.teamKills = Math.max(0, patch.teamKills);
+						if (patch.died !== undefined) h.died = patch.died;
+						if (patch.extracted !== undefined) h.extracted = patch.extracted;
+					}),
+
+				addAdjustment: (runId, raidId, friendId, adj) =>
+					withRaid(runId, raidId, (raid) => {
+						raid.helpers[friendId]?.adjustments.push({
+							id: newId('adj'),
+							amount: adj.amount,
+							reason: adj.reason,
+							presetId: adj.presetId,
+							timestamp: new Date().toISOString(),
+						});
+					}),
+
+				removeAdjustment: (runId, raidId, friendId, adjustmentId) =>
+					withRaid(runId, raidId, (raid) => {
+						const h = raid.helpers[friendId];
+						if (h) h.adjustments = h.adjustments.filter((a) => a.id !== adjustmentId);
+					}),
+
+				setRates: (patch) =>
+					editing(`rates:${Object.keys(patch).join()}`, () =>
+						set((s) => {
+							Object.assign(s.rates, patch);
+						}),
+					),
+
+				applyRatesToRun: (runId) =>
+					set((s) => {
+						const run = s.runs[runId];
+						if (!run) return;
+						for (const raid of run.raids) raid.rates = { ...s.rates };
+						run.completionBonus = s.rates.completionBonus;
+					}),
+
+				applyTargetsToRun: (runId) =>
+					set((s) => {
+						const run = s.runs[runId];
+						if (run) run.requiredBossIds = [...s.requiredBossIds];
+					}),
+
+				savePreset: (preset) => {
+					const save = () =>
+						set((s) => {
+							const i = s.presets.findIndex((p) => p.id === preset.id);
+							if (i >= 0) s.presets[i] = preset;
+							else s.presets.push(preset);
+						});
+					// Adding a preset is its own step; editing its fields groups like typing
+					if (get().presets.some((p) => p.id === preset.id)) {
+						editing(`preset:${preset.id}`, save);
+					} else save();
+				},
+
+				deletePreset: (presetId) =>
+					set((s) => {
+						s.presets = s.presets.filter((p) => p.id !== presetId);
+					}),
+
+				setRequiredBossIds: (ids) =>
+					set((s) => {
+						s.requiredBossIds = ids;
+					}),
+
+				addFriend: (name, color) =>
+					set((s) => {
+						s.friends.push({
+							id: newId('friend'),
+							name: name.trim(),
+							color,
+						});
+					}),
+
+				updateFriend: (friendId, patch) =>
+					set((s) => {
+						const f = s.friends.find((x) => x.id === friendId);
+						if (f) Object.assign(f, patch);
+					}),
+
+				deleteFriend: (friendId) =>
+					set((s) => {
+						s.friends = s.friends.filter((f) => f.id !== friendId);
+					}),
+
+				addPayment: (payment) => get().addPayments([payment]),
+
+				addPayments: (payments) =>
+					set((s) => {
+						const timestamp = new Date().toISOString();
+						for (const payment of payments) {
+							s.payments.push({ ...payment, id: newId('pay'), timestamp });
+						}
+					}),
+
+				removePayment: (paymentId) =>
+					set((s) => {
+						s.payments = s.payments.filter((p) => p.id !== paymentId);
+					}),
+
+				replaceData: (data) => set(() => ({ ...toAppData(data) })),
+			};
+		}),
+		{
+			partialize: (s): History => {
+				const out = {} as Record<keyof History, unknown>;
+				for (const key of HISTORY_KEYS) out[key] = s[key];
+				return out as History;
+			},
+			// immer keeps untouched branches identical, so a shallow compare spots no-op sets
+			equality: (a, b) => HISTORY_KEYS.every((key) => a[key] === b[key]),
+			limit: 100,
+			handleSet: (handleSet) => (pastState, replace) => {
+				const now = Date.now();
+				const sameEdit =
+					editKey !== null && editKey === lastKey && now - lastChange <= UNDO_GROUP_MS;
+				if (!sameEdit) handleSet(pastState, replace as false);
+				lastKey = editKey;
+				lastChange = now;
+			},
+		},
+	),
 );
 
-/** True when a friend appears in any run (as hunter, squad member or helper). */
+export const undo = () => {
+	lastKey = null;
+	useGameStore.temporal.getState().undo();
+};
+export const redo = () => {
+	lastKey = null;
+	useGameStore.temporal.getState().redo();
+};
+export const clearHistory = () => {
+	lastKey = null;
+	useGameStore.temporal.getState().clear();
+};
+
+/** True when a friend appears in any run (as hunter, squad member or helper) or payment. */
 export function friendIsUsed(data: AppData, friendId: string): boolean {
+	if (data.payments.some((p) => p.friendId === friendId)) return true;
 	return Object.values(data.runs).some(
 		(r) =>
 			r.hunterId === friendId ||
@@ -394,22 +486,32 @@ async function loadAndWatch() {
 	const raw = await window.api.loadData();
 	const data = migrate(raw, BOSSES);
 	useGameStore.setState({ ...toAppData(data), ready: true });
+	clearHistory(); // the empty pre-load state is not undoable
 
 	let last = JSON.stringify(toAppData(useGameStore.getState()));
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
-	const flush = () => {
+	let warned = false;
+	const flush = async () => {
 		clearTimeout(timer);
 		timer = undefined;
 		const current = toAppData(useGameStore.getState());
 		const json = JSON.stringify(current);
 		if (json === last) return;
-		last = json;
-		window.api.saveData(current).catch((e) => console.error('Save failed', e));
+		try {
+			await window.api.saveData(current);
+			last = json;
+			warned = false;
+		} catch (e) {
+			// `last` stays stale, so the next change retries the whole state
+			console.error('Save failed', e);
+			if (!warned) toast('Could not save changes. Retrying on the next edit.', 'danger');
+			warned = true;
+		}
 	};
 
 	// A first launch after upgrading writes the migrated file straight away
-	if (raw && (raw as { schemaVersion?: number }).schemaVersion !== 2) {
+	if (raw && (raw as { schemaVersion?: number }).schemaVersion !== SCHEMA_VERSION) {
 		last = '';
 		flush();
 	}
@@ -418,5 +520,6 @@ async function loadAndWatch() {
 		clearTimeout(timer);
 		timer = setTimeout(flush, 300);
 	});
-	window.addEventListener('beforeunload', flush);
+	window.api.onFlushRequest(flush);
+	window.addEventListener('beforeunload', () => void flush());
 }

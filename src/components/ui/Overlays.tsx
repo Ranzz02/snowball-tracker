@@ -75,6 +75,7 @@ export function Modal({
 				role="dialog"
 				aria-modal="true"
 				aria-label={title}
+				data-modal
 				className={`w-full ${width} rounded-sm border bg-panel shadow-2xl focus:outline-hidden`}
 			>
 				<header className="flex items-center justify-between border-b px-4 py-3">

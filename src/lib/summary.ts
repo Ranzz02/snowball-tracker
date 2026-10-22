@@ -1,8 +1,15 @@
-import type { AppData, Boss, Run } from '../models';
-import { formatDate, formatRub } from './format';
-import { bossProgress, ledger, runBreakdown, type BossContext } from './payouts';
+import type { AppData, Boss, Raid, Run } from '../models';
+import { formatDate, formatDateTime, formatRub } from './format';
+import {
+	bossProgress,
+	ledger,
+	raidLines,
+	runBreakdown,
+	sumLines,
+	type BossContext,
+} from './payouts';
 
-const nameOf = (data: AppData, id: string) =>
+export const nameOf = (data: AppData, id: string) =>
 	data.friends.find((f) => f.id === id)?.name ?? 'Unknown';
 
 /** Plain-text recap of one run, ready to paste into Discord. */
@@ -24,6 +31,40 @@ export function runSummaryText(run: Run, data: AppData, ctx: BossContext): strin
 		lines.push(`- ${nameOf(data, fid)}: ${formatRub(total)}`);
 	}
 	lines.push(`Total: ${formatRub(bd.grandTotal)}`);
+	return lines.join('\n');
+}
+
+/** Plain-text recap of one raid, ready to paste into Discord. */
+export function raidSummaryText(
+	raid: Raid,
+	data: AppData,
+	ctx: BossContext,
+	mapName: string,
+): string {
+	const bossName = (id: string) => ctx.bosses.find((b: Boss) => b.id === id)?.name ?? id;
+	const killed = raid.bosses.filter((b) => b.killed).map((b) => bossName(b.bossId));
+	const missed = raid.bosses.filter((b) => !b.killed).map((b) => bossName(b.bossId));
+	const perHelper = raidLines(raid);
+
+	const lines = [`**Raid on ${mapName}, ${formatDateTime(raid.createdAt)}**`];
+	const bosses = [
+		killed.length ? `Killed: ${killed.join(', ')}` : '',
+		missed.length ? `Missed: ${missed.join(', ')}` : '',
+	].filter(Boolean);
+	lines.push(bosses.length ? bosses.join(' | ') : 'No bosses tracked');
+	if (raid.hunterDied) lines.push('Hunter died, run over');
+	lines.push('', '**Payouts**');
+
+	const rows = Object.entries(perHelper)
+		.map(([fid, l]) => ({ fid, total: sumLines(l), labels: l.map((x) => x.label) }))
+		.sort((a, b) => b.total - a.total);
+	if (rows.length === 0) lines.push('No helpers.');
+	for (const r of rows) {
+		const detail = r.labels.length ? ` (${r.labels.join(', ')})` : '';
+		lines.push(`- ${nameOf(data, r.fid)}: ${formatRub(r.total)}${detail}`);
+	}
+	lines.push(`Total: ${formatRub(rows.reduce((s, r) => s + r.total, 0))}`);
+	if (raid.notes.trim()) lines.push('', `Notes: ${raid.notes.trim()}`);
 	return lines.join('\n');
 }
 

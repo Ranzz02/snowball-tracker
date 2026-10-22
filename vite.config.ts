@@ -1,12 +1,37 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import path from 'node:path';
 import electron from 'vite-plugin-electron/simple';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
+// Production only: the dev server needs inline scripts for React Fast Refresh
+const CSP = [
+	"default-src 'self'",
+	"script-src 'self'",
+	"style-src 'self' 'unsafe-inline'",
+	"img-src 'self' data:",
+	"font-src 'self' data:",
+	"object-src 'none'",
+	"base-uri 'none'",
+	"form-action 'none'",
+].join('; ');
+
+const contentSecurityPolicy = (): Plugin => ({
+	name: 'content-security-policy',
+	apply: 'build',
+	transformIndexHtml: () => [
+		{
+			tag: 'meta',
+			attrs: { 'http-equiv': 'Content-Security-Policy', content: CSP },
+			injectTo: 'head-prepend',
+		},
+	],
+});
+
 // https://vitejs.dev/config/
 export default defineConfig({
 	plugins: [
+		contentSecurityPolicy(),
 		react(),
 		tailwindcss(),
 		electron({

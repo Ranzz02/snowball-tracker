@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Crosshair, Settings, Users, Wallet, type LucideIcon } from 'lucide-react';
-import { initializeStore, useGameStore } from './store';
+import { useStore } from 'zustand';
+import { Crosshair, Redo2, Settings, Undo2, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { initializeStore, redo, undo, useGameStore } from './store';
 import { useBossContext, useFriendMap } from './lib/hooks';
 import { bossProgress, runBreakdown } from './lib/payouts';
 import RunsTab from './components/runs/RunsTab';
@@ -8,6 +9,7 @@ import LedgerTab from './components/ledger/LedgerTab';
 import FriendsTab from './components/FriendsTab';
 import SettingsTab from './components/SettingsTab';
 import { FeedbackHost } from './components/ui/Overlays';
+import { shortcutsBlocked } from './components/ui/shortcuts';
 import { FriendChip, ProgressBar, Rub } from './components/ui/ui';
 import './index.css';
 
@@ -71,6 +73,41 @@ function TopBar({ title }: { title: string }) {
 	);
 }
 
+function UndoButtons() {
+	const canUndo = useStore(useGameStore.temporal, (s) => s.pastStates.length > 0);
+	const canRedo = useStore(useGameStore.temporal, (s) => s.futureStates.length > 0);
+	const button =
+		'flex flex-1 items-center justify-center gap-1.5 rounded-sm border px-2 py-1.5 text-xs text-mute transition hover:bg-raised hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-mute';
+	return (
+		<div className="flex gap-2 border-t p-3">
+			<button className={button} onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+				<Undo2 size={14} /> Undo
+			</button>
+			<button className={button} onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">
+				<Redo2 size={14} /> Redo
+			</button>
+		</div>
+	);
+}
+
+// Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z), except in text fields (own undo) or behind a dialog
+function useUndoShortcuts() {
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+			if (shortcutsBlocked(e)) return;
+			const key = e.key.toLowerCase();
+			const isRedo = key === 'y' || (key === 'z' && e.shiftKey);
+			if (key !== 'z' && !isRedo) return;
+			e.preventDefault();
+			if (isRedo) redo();
+			else undo();
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, []);
+}
+
 function App() {
 	const [tab, setTab] = useState<TabId>('runs');
 	const ready = useGameStore((s) => s.ready);
@@ -78,6 +115,7 @@ function App() {
 	useEffect(() => {
 		initializeStore();
 	}, []);
+	useUndoShortcuts();
 
 	if (!ready) {
 		return (
@@ -116,6 +154,7 @@ function App() {
 						</li>
 					))}
 				</ul>
+				<UndoButtons />
 			</nav>
 
 			<div className="flex min-w-0 flex-1 flex-col">

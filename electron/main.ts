@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { fileURLToPath } from 'node:url';
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
+import { promises as fs, writeFileSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -74,9 +74,51 @@ ipcMain.handle('load-data', async () => {
 	return loadLegacy();
 });
 
-ipcMain.handle('save-data', async (_event, data: unknown) => {
-	await fs.mkdir(dataDir, { recursive: true });
-	await writeJsonAtomic(dataFile, data);
+const backupDir = path.join(dataDir, 'backups');
+const KEEP_BACKUPS = 14;
+const BACKUP_NAME = /^app-data-\d{4}-\d{2}-\d{2}\.json$/;
+
+let backedUpDay = ''; // skips the file check on every save once today's copy exists
+
+// Before the first save of each day, keep a copy of the file as it was
+async function dailyBackup(): Promise<void> {
+	const day = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD, local time
+	if (day === backedUpDay) return;
+	const target = path.join(backupDir, `app-data-${day}.json`);
+	try {
+		await fs.access(target);
+		backedUpDay = day;
+		return;
+	} catch {
+		// No backup yet today
+	}
+	try {
+		await fs.mkdir(backupDir, { recursive: true });
+		await fs.copyFile(dataFile, target);
+		backedUpDay = day;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+			console.error('Daily backup failed:', error);
+		}
+		return;
+	}
+	const old = (await fs.readdir(backupDir)).filter((f) => BACKUP_NAME.test(f)).sort();
+	for (const name of old.slice(0, -KEEP_BACKUPS)) {
+		await fs.rm(path.join(backupDir, name)).catch(() => {});
+	}
+}
+
+// Saves run one at a time so two writes can't race on the same temp file
+let saveQueue: Promise<void> = Promise.resolve();
+
+ipcMain.handle('save-data', (_event, data: unknown) => {
+	const save = saveQueue.then(async () => {
+		await fs.mkdir(dataDir, { recursive: true });
+		await dailyBackup();
+		await writeJsonAtomic(dataFile, data);
+	});
+	saveQueue = save.catch(() => {});
+	return save;
 });
 
 ipcMain.handle('export-data', async (event, data: unknown) => {
@@ -95,6 +137,22 @@ ipcMain.handle('export-data', async (event, data: unknown) => {
 		: await dialog.showSaveDialog(options);
 	if (result.canceled || !result.filePath) return null;
 	await writeJsonAtomic(result.filePath, data);
+	return result.filePath;
+});
+
+ipcMain.handle('export-csv', async (event, name: string, csv: string) => {
+	const win = BrowserWindow.fromWebContents(event.sender);
+	const options = {
+		title: 'Export CSV',
+		defaultPath: path.join(app.getPath('documents'), path.basename(name)),
+		filters: [{ name: 'CSV', extensions: ['csv'] }],
+	};
+	const result = win
+		? await dialog.showSaveDialog(win, options)
+		: await dialog.showSaveDialog(options);
+	if (result.canceled || !result.filePath) return null;
+	// The BOM makes Excel read the file as UTF-8 (names with ä, ö and so on)
+	await fs.writeFile(result.filePath, `\ufeff${csv}`, 'utf-8');
 	return result.filePath;
 });
 
@@ -139,18 +197,106 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
 
 let win: BrowserWindow | null;
 
-function createWindow() {
+const windowStateFile = path.join(app.getPath('userData'), 'window-state.json');
+
+interface WindowState {
+	x?: number;
+	y?: number;
+	width: number;
+	height: number;
+	maximized?: boolean;
+}
+
+async function loadWindowState(): Promise<WindowState> {
+	const saved = (await readJson(windowStateFile)) as WindowState | null;
+	if (!saved || typeof saved.width !== 'number' || typeof saved.height !== 'number') {
+		return { width: 1280, height: 860 };
+	}
+	const size = { width: saved.width, height: saved.height, maximized: saved.maximized };
+	if (typeof saved.x !== 'number' || typeof saved.y !== 'number') return size;
+
+	// Forget the position when the monitor it was on is no longer there
+	const bounds = { x: saved.x, y: saved.y, width: saved.width, height: saved.height };
+	const area = screen.getDisplayMatching(bounds).workArea;
+	const visible =
+		bounds.x < area.x + area.width &&
+		bounds.x + bounds.width > area.x &&
+		bounds.y < area.y + area.height &&
+		bounds.y + bounds.height > area.y;
+	return visible ? { ...bounds, maximized: saved.maximized } : size;
+}
+
+// Only the app itself may load in the window (not, say, a file dropped onto it, which
+// would run with window.api); web links open in the browser
+function isAppUrl(url: string): boolean {
+	if (VITE_DEV_SERVER_URL) return url.startsWith(VITE_DEV_SERVER_URL);
+	const appUrl = pathToFileURL(path.join(RENDERER_DIST, 'index.html')).href;
+	return url.split(/[?#]/)[0] === appUrl;
+}
+
+function openExternal(url: string) {
+	if (/^https?:\/\//.test(url)) shell.openExternal(url);
+}
+
+async function createWindow() {
+	const state = await loadWindowState();
 	win = new BrowserWindow({
 		icon: path.join(process.env.VITE_PUBLIC as string, 'icon.png'),
-		width: 1280,
-		height: 860,
+		x: state.x,
+		y: state.y,
+		width: state.width,
+		height: state.height,
 		minWidth: 960,
 		minHeight: 640,
 		backgroundColor: '#0e0f0c',
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.mjs'),
+			contextIsolation: true,
+			nodeIntegration: false,
+			sandbox: true,
 		},
+	});
+	if (state.maximized) win.maximize();
+
+	win.webContents.setWindowOpenHandler(({ url }) => {
+		openExternal(url);
+		return { action: 'deny' };
+	});
+	win.webContents.on('will-navigate', (event, url) => {
+		if (isAppUrl(url)) return;
+		event.preventDefault();
+		openExternal(url);
+	});
+
+	// Let the renderer write pending changes before the window goes away
+	let closing = false;
+	win.on('close', (event) => {
+		if (closing) return;
+		closing = true;
+		event.preventDefault();
+		const target = win;
+		if (target) {
+			const state: WindowState = {
+				...target.getNormalBounds(),
+				maximized: target.isMaximized(),
+			};
+			// Sync: the app may quit as soon as the window is destroyed
+			try {
+				writeFileSync(windowStateFile, JSON.stringify(state));
+			} catch (e) {
+				console.error('Could not save window state:', e);
+			}
+		}
+		const finish = () => {
+			if (!target || target.isDestroyed()) return;
+			target.destroy();
+			// Preventing the close cancelled a Cmd+Q / app.quit(), so carry it on
+			if (quitting) app.quit();
+		};
+		ipcMain.once('flush-done', finish);
+		setTimeout(finish, 2000);
+		target?.webContents.send('flush-request');
 	});
 
 	if (VITE_DEV_SERVER_URL) {
@@ -159,6 +305,11 @@ function createWindow() {
 		win.loadFile(path.join(RENDERER_DIST, 'index.html'));
 	}
 }
+
+let quitting = false;
+app.on('before-quit', () => {
+	quitting = true;
+});
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
@@ -178,4 +329,14 @@ app.on('activate', () => {
 	}
 });
 
-app.whenReady().then(createWindow);
+// A second copy would overwrite the same data file, so focus the first one instead
+if (!app.requestSingleInstanceLock()) {
+	app.quit();
+} else {
+	app.on('second-instance', () => {
+		if (!win || win.isDestroyed()) return;
+		if (win.isMinimized()) win.restore();
+		win.focus();
+	});
+	app.whenReady().then(createWindow);
+}
