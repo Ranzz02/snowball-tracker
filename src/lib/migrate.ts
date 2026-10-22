@@ -2,6 +2,7 @@ import {
 	defaultPresets,
 	defaultRates,
 	emptyAppData,
+	SCHEMA_VERSION,
 	type Adjustment,
 	type AppData,
 	type Boss,
@@ -204,6 +205,8 @@ function migrateV1(raw: LegacyData, bosses: Boss[]): AppData {
 			squad: run.currentSquad ?? [],
 			raids: (run.raids ?? []).map((r) => migrateRaid(r, rates, bosses)),
 			notes: run.notes ?? '',
+			requiredBossIds: [],
+			completionBonus: rates.completionBonus,
 		};
 	}
 
@@ -229,32 +232,42 @@ function pickRates(raw: Partial<Rates> | undefined): Rates {
 	return out;
 }
 
-/** Fill gaps in a v2 file (older v2 builds, hand-edited backups). */
-function normalizeV2(raw: Partial<AppData>): AppData {
+/**
+ * Fill gaps in a v2 or v3 file (older builds, hand-edited backups). v2 runs have no
+ * target or completion bonus snapshot, so they take the current settings, which is
+ * what v2 computed with, and totals stay the same.
+ */
+function normalize(raw: Partial<AppData>): AppData {
 	const empty = emptyAppData();
+	const rates = pickRates(raw.rates);
+	const requiredBossIds = raw.requiredBossIds ?? [];
 	const runs: Record<string, Run> = {};
 	for (const [id, run] of Object.entries(raw.runs ?? {})) {
 		runs[id] = {
 			...run,
+			requiredBossIds: run.requiredBossIds ?? [...requiredBossIds],
+			completionBonus: run.completionBonus ?? rates.completionBonus,
 			raids: run.raids.map((r) => ({ ...r, rates: pickRates(r.rates) })),
 		};
 	}
 	return {
-		schemaVersion: 2,
+		schemaVersion: SCHEMA_VERSION,
 		friends: raw.friends ?? empty.friends,
 		runs,
 		activeRunId: raw.activeRunId ?? null,
-		rates: pickRates(raw.rates),
+		rates,
 		presets: raw.presets ?? defaultPresets.map((p) => ({ ...p })),
-		requiredBossIds: raw.requiredBossIds ?? [],
+		requiredBossIds,
 		payments: raw.payments ?? [],
 	};
 }
 
-/** Accepts v1 (four old files combined) or v2 data and returns v2. */
+/** Accepts v1 (four old files combined), v2 or v3 data and returns v3. */
 export function migrate(raw: unknown, bosses: Boss[]): AppData {
 	if (!raw || typeof raw !== 'object') return emptyAppData();
 	const data = raw as Record<string, unknown>;
-	if (data.schemaVersion === 2) return normalizeV2(data as Partial<AppData>);
+	if (data.schemaVersion === 2 || data.schemaVersion === SCHEMA_VERSION) {
+		return normalize(data as Partial<AppData>);
+	}
 	return migrateV1(data as LegacyData, bosses);
 }

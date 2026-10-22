@@ -4,6 +4,7 @@ import bossData from './data/bosses.json';
 import mapData from './data/maps.json';
 import {
 	emptyAppData,
+	SCHEMA_VERSION,
 	type AppData,
 	type Boss,
 	type Friend,
@@ -18,6 +19,7 @@ import {
 } from './models';
 import { migrate } from './lib/migrate';
 import { newId } from './lib/format';
+import { requiredIds } from './lib/payouts';
 
 export const BOSSES: Boss[] = bossData as Boss[];
 export const MAPS: GameMap[] = mapData as GameMap[];
@@ -91,7 +93,7 @@ interface Runtime {
 export type Store = AppData & Runtime & Actions;
 
 export const toAppData = (s: AppData): AppData => ({
-	schemaVersion: 2,
+	schemaVersion: SCHEMA_VERSION,
 	friends: s.friends,
 	runs: s.runs,
 	activeRunId: s.activeRunId,
@@ -139,6 +141,8 @@ export const useGameStore = create<Store>()(
 						squad: squad.filter((f) => f !== hunterId),
 						raids: [],
 						notes: '',
+						requiredBossIds: [...s.requiredBossIds],
+						completionBonus: s.rates.completionBonus,
 					};
 					s.activeRunId = id;
 				});
@@ -202,9 +206,7 @@ export const useGameStore = create<Store>()(
 				const killed = new Set(
 					run.raids.flatMap((r) => r.bosses.filter((b) => b.killed).map((b) => b.bossId)),
 				);
-				const required = new Set(
-					s.requiredBossIds.length > 0 ? s.requiredBossIds : s.bosses.map((b) => b.id),
-				);
+				const required = new Set(requiredIds(run, s));
 				const wanted = onMap.filter((b) => required.has(b.id) && !killed.has(b.id));
 				const targets = wanted.length > 0 ? wanted : onMap;
 
@@ -315,6 +317,8 @@ export const useGameStore = create<Store>()(
 					const run = s.runs[runId];
 					if (!run) return;
 					for (const raid of run.raids) raid.rates = { ...s.rates };
+					run.completionBonus = s.rates.completionBonus;
+					run.requiredBossIds = [...s.requiredBossIds];
 				}),
 
 			savePreset: (preset) =>
@@ -373,8 +377,9 @@ export const useGameStore = create<Store>()(
 	}),
 );
 
-/** True when a friend appears in any run (as hunter, squad member or helper). */
+/** True when a friend appears in any run (as hunter, squad member or helper) or payment. */
 export function friendIsUsed(data: AppData, friendId: string): boolean {
+	if (data.payments.some((p) => p.friendId === friendId)) return true;
 	return Object.values(data.runs).some(
 		(r) =>
 			r.hunterId === friendId ||
@@ -409,7 +414,7 @@ async function loadAndWatch() {
 	};
 
 	// A first launch after upgrading writes the migrated file straight away
-	if (raw && (raw as { schemaVersion?: number }).schemaVersion !== 2) {
+	if (raw && (raw as { schemaVersion?: number }).schemaVersion !== SCHEMA_VERSION) {
 		last = '';
 		flush();
 	}

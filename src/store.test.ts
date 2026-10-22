@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyAppData } from './models';
-import { useGameStore } from './store';
+import { friendIsUsed, useGameStore } from './store';
 
 describe('setHunterDied', () => {
 	let runId: string;
@@ -32,5 +32,50 @@ describe('setHunterDied', () => {
 		useGameStore.getState().endRun(runId, 'completed');
 		useGameStore.getState().setHunterDied(runId, raidId, false);
 		expect(run().status).toBe('completed');
+	});
+});
+
+describe('run snapshots', () => {
+	beforeEach(() => useGameStore.setState({ ...emptyAppData() }));
+
+	it('copies targets and completion bonus when a run starts', () => {
+		const s = useGameStore.getState();
+		s.setRequiredBossIds(['killa']);
+		s.setRates({ completionBonus: 42 });
+		const id = s.startRun('hunter', ['helper']);
+		s.setRequiredBossIds([]);
+		s.setRates({ completionBonus: 7 });
+		const run = useGameStore.getState().runs[id];
+		expect(run.requiredBossIds).toEqual(['killa']);
+		expect(run.completionBonus).toBe(42);
+	});
+
+	it('applyRatesToRun refreshes the run snapshots', () => {
+		const s = useGameStore.getState();
+		const id = s.startRun('hunter', []);
+		s.setRequiredBossIds(['killa']);
+		s.setRates({ completionBonus: 9 });
+		s.applyRatesToRun(id);
+		const run = useGameStore.getState().runs[id];
+		expect(run.requiredBossIds).toEqual(['killa']);
+		expect(run.completionBonus).toBe(9);
+	});
+
+	it('only targets bosses the run still needs on the map', () => {
+		const s = useGameStore.getState();
+		s.setRequiredBossIds(['tagilla']);
+		const id = s.startRun('hunter', []);
+		const raidId = s.addRaid(id, 'interchange')!;
+		const raid = useGameStore.getState().runs[id].raids.find((r) => r.id === raidId)!;
+		expect(raid.bosses.map((b) => b.bossId)).toEqual(['tagilla']);
+	});
+});
+
+describe('friendIsUsed', () => {
+	it('counts payments as use', () => {
+		const data = emptyAppData();
+		data.payments = [{ id: 'p', friendId: 'f1', amount: 1, timestamp: '' }];
+		expect(friendIsUsed(data, 'f1')).toBe(true);
+		expect(friendIsUsed(data, 'f2')).toBe(false);
 	});
 });

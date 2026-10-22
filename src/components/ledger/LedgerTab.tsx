@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ClipboardCopy, Undo2 } from 'lucide-react';
 import { useGameStore, toAppData } from '../../store';
-import type { Friend } from '../../models';
+import { SCHEMA_VERSION, type Friend } from '../../models';
 import { useBossContext } from '../../lib/hooks';
 import { ledger, runBreakdown, type Category, type LedgerEntry } from '../../lib/payouts';
 import { owedSummaryText } from '../../lib/summary';
@@ -135,7 +135,7 @@ export default function LedgerTab() {
 	const data = useMemo(
 		() =>
 			toAppData({
-				schemaVersion: 2,
+				schemaVersion: SCHEMA_VERSION,
 				friends,
 				runs,
 				activeRunId: null,

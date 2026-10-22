@@ -23,7 +23,7 @@ function RatesPanel() {
 							const ok = await confirmAction({
 								title: 'Apply to current run?',
 								message:
-									'Overwrites the rates of every raid in the open run, including hand-edited ones.',
+									'Overwrites the rates of every raid in the open run, including hand-edited ones, and its achievement targets and completion bonus.',
 								confirmLabel: 'Apply',
 							});
 							if (ok) {
@@ -38,8 +38,9 @@ function RatesPanel() {
 			}
 		>
 			<p className="mb-4 text-xs text-mute">
-				These are copied into each new raid. Changing them here does not touch existing
-				raids. Penalties are entered as positive numbers.
+				These are copied into each new raid (the completion bonus into each new run).
+				Changing them here does not touch existing raids or runs. Penalties are entered as
+				positive numbers.
 			</p>
 			<div className="grid gap-4 md:grid-cols-2">
 				{RATE_FIELDS.map((f) => (
@@ -142,7 +143,8 @@ function TargetsPanel() {
 			}
 		>
 			<p className="mb-3 text-xs text-mute">
-				Bosses that count toward the progress bar and the completion bonus.
+				Bosses that count toward the progress bar and the completion bonus. Copied into each
+				new run; use "Apply to open run" under Rates to update the current one.
 			</p>
 			<div className="flex flex-wrap gap-2">
 				{bosses.map((b) => (

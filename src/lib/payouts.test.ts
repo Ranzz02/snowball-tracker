@@ -33,7 +33,7 @@ const raid = (
 	...over,
 });
 
-const run = (raids: Raid[], status: Run['status'] = 'active'): Run => ({
+const run = (raids: Raid[], status: Run['status'] = 'active', over: Partial<Run> = {}): Run => ({
 	id: 'run1',
 	createdAt: raids[0]?.createdAt ?? '',
 	status,
@@ -41,9 +41,12 @@ const run = (raids: Raid[], status: Run['status'] = 'active'): Run => ({
 	squad: ['f1'],
 	raids,
 	notes: '',
+	requiredBossIds: [],
+	completionBonus: rates.completionBonus,
+	...over,
 });
 
-const ctx = { bosses, requiredBossIds: [], rates };
+const ctx = { bosses };
 
 describe('raidLines', () => {
 	it('pays base per boss killed', () => {
@@ -115,10 +118,30 @@ describe('runBreakdown', () => {
 	});
 
 	it('honours requiredBossIds', () => {
-		const r = run([raid('r1', 1, ['a'])]);
-		const p = bossProgress(r, { ...ctx, requiredBossIds: ['a', 'b'] });
+		const r = run([raid('r1', 1, ['a'])], 'active', { requiredBossIds: ['a', 'b'] });
+		const p = bossProgress(r, ctx);
 		expect(p.killed).toEqual(['a']);
 		expect(p.remaining).toEqual(['b']);
+	});
+});
+
+describe('run snapshots', () => {
+	const completed = () => {
+		const data = emptyAppData();
+		data.friends = [{ id: 'f1', name: 'F', color: '#fff' }];
+		data.runs = {
+			run1: run([raid('r1', 1, ['a', 'b'])], 'completed', { requiredBossIds: ['a', 'b'] }),
+		};
+		return data;
+	};
+
+	it('keeps a finished run unchanged when global settings change', () => {
+		const data = completed();
+		const before = ledger(data, bosses).f1.earned;
+		data.rates.completionBonus = 1;
+		data.requiredBossIds = ['a', 'b', 'c', 'd'];
+		expect(ledger(data, bosses).f1.earned).toBe(before);
+		expect(before).toBe(2 * rates.basePerBoss + rates.completionBonus);
 	});
 });
 
