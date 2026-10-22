@@ -1,36 +1,79 @@
 name: Release
 
 on:
-  # Called by release-please after it creates a release
-  workflow_call:
-    inputs:
-      tag:
-        type: string
-        required: true
-  # Manual (re)build of an existing tag
+  # Every merge into main: feat/fix/perf/revert (or breaking) releases, other types don't
+  push:
+    branches: [main]
+  # Rebuild the installer for an existing tag
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to build, e.g. v1.1.0
+        description: Existing tag to rebuild, e.g. v1.1.0
         type: string
         required: true
-  # A tag pushed by hand still builds a release
-  push:
-    tags: ['v*']
 
 permissions:
   contents: write
 
+# One release at a time, so two quick merges can't both claim the same version
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  windows:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag || steps.manual.outputs.tag }}
+      version: ${{ steps.next.outputs.version || steps.manual.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # all commits and tags since the last release
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Work out the next version from the commits since the last tag
+        id: next
+        if: github.event_name == 'push'
+        run: node scripts/release.ts
+
+      - name: Use the tag given for a manual rebuild
+        id: manual
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          git rev-parse --verify --quiet "refs/tags/$TAG" > /dev/null || { echo "No tag $TAG" >&2; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Pass the release notes on
+        id: notes
+        if: steps.next.outputs.notes_file != ''
+        run: |
+          {
+            echo 'notes<<RELEASE_NOTES_EOF'
+            cat "${{ steps.next.outputs.notes_file }}"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    if: needs.version.outputs.tag != ''
     runs-on: windows-latest
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
+      NOTES: ${{ needs.version.outputs.notes }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.sha }}
 
       - uses: actions/setup-node@v7
         with:
@@ -46,24 +89,30 @@ jobs:
 
       - run: yarn install --immutable
 
-      - name: Check tag matches package.json version
+      # The tag is the source of truth; package.json in the repo isn't bumped
+      - name: Stamp the version into package.json
         shell: bash
         run: |
-          version="$(node -p "require('./package.json').version")"
-          if [ "v$version" != "$TAG" ]; then
-            echo "Tag $TAG does not match package.json version $version" >&2
-            exit 1
-          fi
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
 
       - run: yarn test
       - run: yarn build
 
-      - name: Attach installer to the GitHub release
+      # The tag is only created once the installer has built, so a failed build leaves no
+      # release behind and the next merge picks the same commits up again
+      - name: Publish the GitHub release
         shell: bash
         run: |
           files=(release/*/SnowballTracker-Windows-*-Setup.exe)
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           else
-            gh release create "$TAG" "${files[@]}" --title "$TAG" --generate-notes
+            printf '%s\n' "$NOTES" > release-notes.md
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "$TAG" \
+              --notes-file release-notes.md
           fi

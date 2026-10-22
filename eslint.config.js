@@ -22,7 +22,7 @@ export default defineConfig([
 		},
 	},
 	{
-		files: ['electron/**/*.ts', 'vite.config.ts'],
+		files: ['electron/**/*.ts', 'scripts/**/*.ts', 'vite.config.ts'],
 		extends: [js.configs.recommended, tseslint.configs.recommended],
 		languageOptions: {
 			ecmaVersion: 2020,
