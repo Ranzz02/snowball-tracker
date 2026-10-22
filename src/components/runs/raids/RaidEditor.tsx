@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check, ClipboardCopy, Skull, Trash2, X } from 'lucide-react';
 import { toAppData, useGameStore } from '../../../store';
 import type { Raid, RaidHelper } from '../../../models';
@@ -7,7 +7,7 @@ import { runBreakdown, sumLines, type Line } from '../../../lib/payouts';
 import { formatShort, formatSigned } from '../../../lib/format';
 import { RATE_FIELDS } from '../../../lib/rateFields';
 import { raidSummaryText } from '../../../lib/summary';
-import { confirmAction, toast } from '../../ui/feedback';
+import { confirmAction, toast, useFeedback } from '../../ui/feedback';
 import { Drawer } from '../../ui/Overlays';
 import {
 	BossAvatar,
@@ -20,15 +20,27 @@ import {
 	inputClass,
 } from '../../ui/ui';
 
+// Number shown next to a boss or helper for its 1–9 keyboard shortcut
+function KeyHint({ index }: { index: number }) {
+	if (index >= 9) return null;
+	return (
+		<kbd className="rounded-sm border px-1 font-sans text-[10px] leading-4 text-mute">
+			{index + 1}
+		</kbd>
+	);
+}
+
 function HelperCard({
 	runId,
 	raid,
 	helper,
+	index,
 	lines,
 }: {
 	runId: string;
 	raid: Raid;
 	helper: RaidHelper;
+	index: number;
 	lines: Line[];
 }) {
 	const friends = useFriendMap();
@@ -63,6 +75,7 @@ function HelperCard({
 					<span className="font-display text-lg font-semibold">
 						{friend?.name ?? 'Unknown'}
 					</span>
+					<KeyHint index={index} />
 				</div>
 				<div className="flex items-center gap-3">
 					<Rub
@@ -216,6 +229,7 @@ export default function RaidEditor({
 	const maps = useGameStore((s) => s.maps);
 	const friends = useGameStore((s) => s.friends);
 	const toggleBossKilled = useGameStore((s) => s.toggleBossKilled);
+	const setHelperField = useGameStore((s) => s.setHelperField);
 	const setHunterDied = useGameStore((s) => s.setHunterDied);
 	const addHelper = useGameStore((s) => s.addHelper);
 	const deleteRaid = useGameStore((s) => s.deleteRaid);
@@ -232,6 +246,32 @@ export default function RaidEditor({
 	);
 	const lines = (raid && breakdown?.perRaid[raid.id]) || {};
 	const total = Object.values(lines).reduce((s, l) => s + sumLines(l), 0);
+
+	// 1–9 toggles a boss, Shift+1–9 adds a PMC kill to that helper (not while typing)
+	useEffect(() => {
+		if (!raid) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+			const target = e.target as HTMLElement | null;
+			if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+			if (useFeedback.getState().confirmRequest) return;
+			const digit = /^Digit([1-9])$/.exec(e.code);
+			if (!digit) return;
+			const i = Number(digit[1]) - 1;
+			if (e.shiftKey) {
+				const h = Object.values(raid.helpers)[i];
+				if (!h) return;
+				setHelperField(runId, raid.id, h.friendId, { pmcKills: h.pmcKills + 1 });
+			} else {
+				const b = raid.bosses[i];
+				if (!b) return;
+				toggleBossKilled(runId, raid.id, b.bossId, !b.killed);
+			}
+			e.preventDefault();
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, [raid, runId, setHelperField, toggleBossKilled]);
 
 	const copySummary = async () => {
 		if (!raid) return;
@@ -288,17 +328,22 @@ export default function RaidEditor({
 							className="font-display text-2xl font-semibold text-ok"
 						/>
 					</div>
+					<p className="-mt-4 text-xs text-mute">
+						Keys: 1–9 toggles a boss, Shift+1–9 adds a PMC kill to that helper, Ctrl+Z
+						undoes.
+					</p>
 
 					<section>
 						<h3 className="label-caps mb-2 text-sm text-accent">Bosses</h3>
 						<div className="flex flex-wrap gap-2">
-							{raid.bosses.map((b) => (
+							{raid.bosses.map((b, i) => (
 								<Toggle
 									key={b.bossId}
 									checked={b.killed}
 									tone="ok"
 									onChange={(v) => toggleBossKilled(runId, raid.id, b.bossId, v)}
 								>
+									<KeyHint index={i} />
 									<BossAvatar
 										boss={bosses.find((x) => x.id === b.bossId)}
 										size={22}
@@ -352,12 +397,13 @@ export default function RaidEditor({
 							)}
 						</div>
 						<div className="space-y-3">
-							{Object.values(raid.helpers).map((h) => (
+							{Object.values(raid.helpers).map((h, i) => (
 								<HelperCard
 									key={h.friendId}
 									runId={runId}
 									raid={raid}
 									helper={h}
+									index={i}
 									lines={lines[h.friendId] ?? []}
 								/>
 							))}
