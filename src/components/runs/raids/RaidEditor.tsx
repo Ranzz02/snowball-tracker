@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Check, Skull, Trash2, X } from 'lucide-react';
-import { useGameStore } from '../../../store';
+import { Check, ClipboardCopy, Skull, Trash2, X } from 'lucide-react';
+import { toAppData, useGameStore } from '../../../store';
 import type { Raid, RaidHelper } from '../../../models';
 import { useBossContext, useFriendMap } from '../../../lib/hooks';
 import { runBreakdown, sumLines, type Line } from '../../../lib/payouts';
 import { formatShort, formatSigned } from '../../../lib/format';
 import { RATE_FIELDS } from '../../../lib/rateFields';
-import { confirmAction } from '../../ui/feedback';
+import { raidSummaryText } from '../../../lib/summary';
+import { confirmAction, toast } from '../../ui/feedback';
 import { Drawer } from '../../ui/Overlays';
 import {
 	BossAvatar,
@@ -232,6 +233,17 @@ export default function RaidEditor({
 	const lines = (raid && breakdown?.perRaid[raid.id]) || {};
 	const total = Object.values(lines).reduce((s, l) => s + sumLines(l), 0);
 
+	const copySummary = async () => {
+		if (!raid) return;
+		const text = raidSummaryText(raid, toAppData(useGameStore.getState()), ctx, mapName);
+		try {
+			await navigator.clipboard.writeText(text);
+			toast('Raid summary copied');
+		} catch {
+			toast('Could not copy to clipboard', 'danger');
+		}
+	};
+
 	return (
 		<Drawer
 			open={!!raid}
@@ -240,25 +252,30 @@ export default function RaidEditor({
 			subtitle={raid ? new Date(raid.createdAt).toLocaleString() : undefined}
 			actions={
 				raid && (
-					<Button
-						variant="danger"
-						size="sm"
-						onClick={async () => {
-							const ok = await confirmAction({
-								title: 'Delete raid?',
-								message:
-									'This removes the raid and its payouts. It cannot be undone.',
-								confirmLabel: 'Delete',
-								danger: true,
-							});
-							if (ok) {
-								deleteRaid(runId, raid.id);
-								onClose();
-							}
-						}}
-					>
-						<Trash2 size={13} /> Delete
-					</Button>
+					<>
+						<Button size="sm" onClick={copySummary}>
+							<ClipboardCopy size={13} /> Copy
+						</Button>
+						<Button
+							variant="danger"
+							size="sm"
+							onClick={async () => {
+								const ok = await confirmAction({
+									title: 'Delete raid?',
+									message:
+										'This removes the raid and its payouts. It cannot be undone.',
+									confirmLabel: 'Delete',
+									danger: true,
+								});
+								if (ok) {
+									deleteRaid(runId, raid.id);
+									onClose();
+								}
+							}}
+						>
+							<Trash2 size={13} /> Delete
+						</Button>
+					</>
 				)
 			}
 		>
